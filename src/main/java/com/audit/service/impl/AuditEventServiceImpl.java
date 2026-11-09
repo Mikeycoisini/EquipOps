@@ -67,7 +67,14 @@ public class AuditEventServiceImpl implements AuditEventService {
         //
         long current = Math.max(1, query.getCurrent());//限制页数
         long size = Math.max(1, Math.min(100, query.getSize()));//限制每页的最大条数据
-        long offset = (current - 1) * size;//跳过多少条数据
+        long offset;
+        try {
+            // 使用精确乘法，拒绝溢出页码而不是向SQL传递负数或错误偏移。
+            offset = Math.multiplyExact(current - 1, size);
+        } catch (ArithmeticException overflow) {
+            // 参数超出可表达范围时在访问数据库前返回明确400。
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "页码超出允许范围");
+        }
 
         // 3. 校验 occurredFrom/occurredTo：两者都存在时 from 不得晚于 to，否则 400。
         //判断开始时间是否为空和结束是否为空，一者为空返回400，两者不为空，进行判断“开始时间是否晚于结束时间”
@@ -102,6 +109,22 @@ public class AuditEventServiceImpl implements AuditEventService {
         //    无数据返回空 records，不返回 null。
         List<AuditEventVO> records = auditEventMapper.selectPage(
                 tenantId, query, offset, size);
+        // 8. 逐条解析摘要，内部JSON不直接进入响应字段。
+        for (AuditEventVO record : records) {
+            // 每条记录独立处理，异常JSON不能令整页失败或回显原文。
+            try {
+                // 只将结构化变更传递给既有摘要生成器。
+                Map<String, Object> changes = record.getChangesJson() == null ? null
+                        : objectMapper.readValue(record.getChangesJson(), new TypeReference<Map<String, Object>>() {});
+                // 按已有摘要协议提供列表摘要。
+                record.setSummary(buildSummary(changes));
+            } catch (JacksonException malformed) {
+                // 仅输出事件ID，不记录原始JSON或解析异常正文。
+                log.warn("审计列表摘要解析失败，id={}", record.getId());
+                // 无法解析时明确没有摘要。
+                record.setSummary(null);
+            }
+        }
         page.setRecords(records);
         return page;
 
@@ -114,7 +137,7 @@ public class AuditEventServiceImpl implements AuditEventService {
         Long tenantId = currentAccessService.requireTenantAdminTenantId();
         // 2. 校验 id：null 或 <=0 返回 400。
         //
-        if (id == null || id < 0){
+        if (id == null || id <= 0){
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "审计事件ID无效");
         }
         // 3. 调用 selectDetailById(tenantId, id)；
@@ -272,7 +295,9 @@ public class AuditEventServiceImpl implements AuditEventService {
         Object field = changes.get("field");
         Object before = changes.get("before");
         Object after = changes.get("after");
-        if (field != null && (before != null || after != null)) {
+        // 首单元只开放已确认的启停布尔字段，其他摘要待逐动作定义白名单。
+        if ("enabled".equals(field) && before instanceof Boolean && after instanceof Boolean) {
+            // 不对任意字符串、嵌套Map或List调用toString，避免敏感内容进入列表。
             return field + "：[" + before + "] -> [" + after + "]";
         }
         return null;
