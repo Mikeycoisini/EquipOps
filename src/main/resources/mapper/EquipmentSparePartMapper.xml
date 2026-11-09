@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.equipment.mapper.EquipmentSparePartMapper">
+    <select id="selectTenantEquipmentForUpdate" resultType="com.equipops.domain.entity.EquipmentEntity">
+        SELECT id, tenant_id AS tenantId FROM equipment
+        WHERE tenant_id = #{tenantId} AND id = #{equipmentId}
+        FOR UPDATE
+    </select>
+    <select id="selectTenantSparePartForUpdate" resultType="com.equipops.domain.entity.SparePartEntity">
+        SELECT id, tenant_id AS tenantId, enabled FROM spare_parts
+        WHERE tenant_id = #{tenantId} AND id = #{sparePartId}
+        FOR UPDATE
+    </select>
+    <select id="findRelationId" resultType="java.lang.Long">
+        SELECT id FROM equipment_spare_parts
+        WHERE tenant_id = #{tenantId} AND equipment_id = #{equipmentId} AND spare_part_id = #{sparePartId}
+    </select>
+    <insert id="insertRelation" useGeneratedKeys="true" keyProperty="relation.id" keyColumn="id">
+        INSERT INTO equipment_spare_parts (tenant_id, equipment_id, spare_part_id, created_by)
+        VALUES (#{relation.tenantId}, #{relation.equipmentId}, #{relation.sparePartId}, #{relation.createdBy})
+    </insert>
+    <resultMap id="relationView" type="com.equipops.domain.vo.EquipmentSparePartVO">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="equipmentId" column="equipment_id"/>
+        <result property="sparePartId" column="spare_part_id"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="equipmentAssetCode" column="equipment_asset_code"/>
+        <result property="equipmentName" column="equipment_name"/>
+        <result property="sparePartCode" column="spare_part_code"/>
+        <result property="sparePartName" column="spare_part_name"/>
+        <result property="sparePartSpec" column="spare_part_spec"/>
+        <result property="sparePartUnit" column="spare_part_unit"/>
+        <result property="sparePartEnabled" column="spare_part_enabled"/>
+    </resultMap>
+    <select id="selectRelationDetail" resultMap="relationView">
+        SELECT r.id, r.tenant_id, r.equipment_id, r.spare_part_id, r.created_by, r.created_at,
+               e.asset_code AS equipment_asset_code, e.name AS equipment_name,
+               p.part_code AS spare_part_code, p.name AS spare_part_name, p.spec AS spare_part_spec,
+               p.unit AS spare_part_unit, p.enabled AS spare_part_enabled
+        FROM equipment_spare_parts r
+        INNER JOIN equipment e ON e.tenant_id = r.tenant_id AND e.id = r.equipment_id
+        INNER JOIN spare_parts p ON p.tenant_id = r.tenant_id AND p.id = r.spare_part_id
+        WHERE r.tenant_id = #{tenantId} AND r.id = #{id}
+    </select>
+    <!-- 只读入口的设备归属检查，不复用创建接口的FOR UPDATE查询。 -->
+    <select id="selectTenantEquipment" resultType="com.equipops.domain.entity.EquipmentEntity">
+        SELECT id, tenant_id AS tenantId FROM equipment
+        WHERE tenant_id = #{tenantId} AND id = #{equipmentId}
+    </select>
+    <!-- 备件停用仍保留适配关系，启用状态交由前端展示。 -->
+    <select id="selectRelationsByEquipment" resultMap="relationView">
+        SELECT r.id, r.tenant_id, r.equipment_id, r.spare_part_id, r.created_by, r.created_at,
+               e.asset_code AS equipment_asset_code, e.name AS equipment_name,
+               p.part_code AS spare_part_code, p.name AS spare_part_name, p.spec AS spare_part_spec,
+               p.unit AS spare_part_unit, p.enabled AS spare_part_enabled
+        FROM equipment_spare_parts r
+        INNER JOIN equipment e ON e.tenant_id = r.tenant_id AND e.id = r.equipment_id
+        INNER JOIN spare_parts p ON p.tenant_id = r.tenant_id AND p.id = r.spare_part_id
+        WHERE r.tenant_id = #{tenantId} AND r.equipment_id = #{equipmentId}
+        ORDER BY r.id DESC
+    </select>
+    <delete id="deleteRelation">
+        DELETE FROM equipment_spare_parts
+        WHERE tenant_id = #{tenantId} AND equipment_id = #{equipmentId} AND spare_part_id = #{sparePartId}
+    </delete>
+    <!-- 反向查询的归属检查，停用备件也允许读取历史关联。 -->
+    <select id="selectTenantSparePart" resultType="com.equipops.domain.entity.SparePartEntity">
+        SELECT id, tenant_id AS tenantId, enabled FROM spare_parts
+        WHERE tenant_id = #{tenantId} AND id = #{sparePartId}
+    </select>
+    <select id="selectRelationsBySparePart" resultMap="relationView">
+        SELECT r.id, r.tenant_id, r.equipment_id, r.spare_part_id, r.created_by, r.created_at,
+               e.asset_code AS equipment_asset_code, e.name AS equipment_name,
+               p.part_code AS spare_part_code, p.name AS spare_part_name, p.spec AS spare_part_spec,
+               p.unit AS spare_part_unit, p.enabled AS spare_part_enabled
+        FROM equipment_spare_parts r
+        INNER JOIN equipment e ON e.tenant_id = r.tenant_id AND e.id = r.equipment_id
+        INNER JOIN spare_parts p ON p.tenant_id = r.tenant_id AND p.id = r.spare_part_id
+        WHERE r.tenant_id = #{tenantId} AND r.spare_part_id = #{sparePartId}
+        ORDER BY r.id DESC
+    </select>
+</mapper>

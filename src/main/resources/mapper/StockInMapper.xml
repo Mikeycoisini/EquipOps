@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.inventory.mapper.StockInMapper">
+    <resultMap id="transactionMap" type="com.equipops.domain.entity.InventoryTransactionEntity">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="warehouseId" column="warehouse_id"/>
+        <result property="requestId" column="request_id"/>
+        <result property="transactionNo" column="transaction_no"/>
+        <result property="sparePartId" column="spare_part_id"/>
+        <result property="transactionType" column="transaction_type"/>
+        <result property="quantity" column="quantity"/>
+        <result property="referenceType" column="reference_type"/>
+        <result property="referenceText" column="reference_text"/>
+        <result property="workOrderId" column="work_order_id"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="note" column="note"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+    <resultMap id="warehouseCheckMap" type="com.equipops.domain.vo.StockInWarehouseCheckVO">
+        <id property="warehouseId" column="warehouse_id"/>
+        <result property="warehouseEnabled" column="warehouse_enabled"/>
+        <result property="siteId" column="site_id"/>
+        <result property="siteEnabled" column="site_enabled"/>
+    </resultMap>
+    <sql id="transactionColumns">
+        id, tenant_id, warehouse_id, request_id, transaction_no, spare_part_id,
+        transaction_type, quantity, reference_type, reference_text, work_order_id,
+        created_by, note, created_at
+    </sql>
+
+    <!-- 普通重试不锁空请求号，避免对不存在的唯一键提前持有间隙锁。 -->
+    <select id="findByRequest" resultMap="transactionMap">
+        SELECT <include refid="transactionColumns"/>
+        FROM inventory_transactions
+        WHERE tenant_id = #{tenantId} AND request_id = #{requestId}
+    </select>
+    <!-- 并发唯一键冲突后使用当前读，不能继续使用早期一致性快照。 -->
+    <select id="findByRequestForUpdate" resultMap="transactionMap">
+        SELECT <include refid="transactionColumns"/>
+        FROM inventory_transactions
+        WHERE tenant_id = #{tenantId} AND request_id = #{requestId}
+        FOR UPDATE
+    </select>
+
+    <!-- 入库先锁仓库/厂区再锁备件；状态检查完成后，其他事务不能同时将它们停用。 -->
+    <select id="lockWarehouseForStockIn" resultMap="warehouseCheckMap">
+        SELECT w.id AS warehouse_id, w.enabled AS warehouse_enabled,
+               s.id AS site_id, s.enabled AS site_enabled
+        FROM warehouses w
+        LEFT JOIN sites s ON s.id = w.site_id AND s.tenant_id = w.tenant_id
+        WHERE w.tenant_id = #{tenantId} AND w.id = #{warehouseId}
+        FOR UPDATE
+    </select>
+    <select id="lockSparePartEnabled" resultType="java.lang.Boolean">
+        SELECT enabled FROM spare_parts
+        WHERE tenant_id = #{tenantId} AND id = #{sparePartId}
+        FOR UPDATE
+    </select>
+
+    <!-- 类型及来源固定为普通手工入库；客户端不能指定操作人或企业。 -->
+    <insert id="insertStockIn" useGeneratedKeys="true" keyProperty="log.id" keyColumn="id">
+        INSERT INTO inventory_transactions (
+            tenant_id, warehouse_id, request_id, transaction_no, spare_part_id,
+            transaction_type, quantity, reference_type, reference_text, work_order_id, created_by, note
+        ) VALUES (
+            #{log.tenantId}, #{log.warehouseId}, #{log.requestId}, #{log.transactionNo}, #{log.sparePartId},
+            'INBOUND', #{log.quantity}, 'MANUAL', #{log.referenceText,jdbcType=VARCHAR}, NULL,
+            #{log.createdBy}, #{log.note,jdbcType=VARCHAR}
+        )
+    </insert>
+
+    <!-- 首次建账按新表默认规则从零开始，不搬运目录旧库存或旧阈值。 -->
+    <insert id="ensureStockRow">
+        INSERT INTO warehouse_stock (tenant_id, warehouse_id, spare_part_id, quantity, min_stock_quantity)
+        VALUES (#{tenantId}, #{warehouseId}, #{sparePartId}, 0, 0)
+        ON DUPLICATE KEY UPDATE id = id
+    </insert>
+    <!-- 加量在数据库完成，不把之前查到的旧数量写回；条件防止 DECIMAL(14,3) 溢出。 -->
+    <update id="increaseStock">
+        UPDATE warehouse_stock SET quantity = quantity + #{quantity}
+        WHERE tenant_id = #{tenantId} AND warehouse_id = #{warehouseId} AND spare_part_id = #{sparePartId}
+          AND quantity &lt;= 99999999999.999 - #{quantity}
+    </update>
+    <select id="findById" resultMap="transactionMap">
+        SELECT <include refid="transactionColumns"/>
+        FROM inventory_transactions WHERE tenant_id = #{tenantId} AND id = #{id}
+    </select>
+</mapper>

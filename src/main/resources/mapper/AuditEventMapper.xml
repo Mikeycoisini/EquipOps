@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.audit.mapper.AuditEventMapper">
+    <resultMap id="auditEventViewMap" type="com.equipops.domain.vo.AuditEventVO">
+        <id property="id" column="id"/>
+        <result property="actorUserId" column="actor_user_id"/>
+        <result property="actorName" column="actor_name"/>
+        <result property="actorType" column="actor_type"/>
+        <result property="action" column="action"/>
+        <result property="objectType" column="object_type"/>
+        <result property="objectId" column="object_id"/>
+        <result property="outcome" column="outcome"/>
+        <result property="requestId" column="request_id"/>
+        <result property="occurredAt" column="occurred_at"/>
+        <result property="changesJson" column="changes_json"/>
+    </resultMap>
+
+    <!-- 详情复用列表字段，changes 由 Service 解析 changes_json 后填充。 -->
+    <resultMap id="auditEventDetailMap" type="com.equipops.domain.vo.AuditEventDetailVO"
+               extends="auditEventViewMap"/>
+
+    <!-- 企业条件必须在 SQL 内，不能只依赖 Service 判断。 -->
+    <sql id="tenantAndFilters">
+        e.tenant_id = #{tenantId}
+        <if test="q.action != null">AND e.action = #{q.action}</if>
+        <if test="q.actorUserId != null">AND e.actor_user_id = #{q.actorUserId}</if>
+        <if test="q.objectType != null">AND e.object_type = #{q.objectType}</if>
+        <if test="q.objectId != null">AND e.object_id = #{q.objectId}</if>
+        <if test="q.outcome != null">AND e.outcome = #{q.outcome}</if>
+        <if test="q.occurredFrom != null">AND e.occurred_at &gt;= #{q.occurredFrom}</if>
+        <if test="q.occurredTo != null">AND e.occurred_at &lt;= #{q.occurredTo}</if>
+    </sql>
+
+    <!-- 计数不关联用户表，避免显示名关联影响统计结果。 -->
+    <select id="countByQuery" resultType="long">
+        SELECT COUNT(*)
+        FROM audit_events e
+        WHERE <include refid="tenantAndFilters"/>
+    </select>
+
+    <!-- 显示名只关联当前企业的成员关系，不跨企业取 users。 -->
+    <select id="selectPage" resultMap="auditEventViewMap">
+        SELECT e.id, e.actor_user_id, u.display_name AS actor_name, e.actor_type,
+               e.action, e.object_type, e.object_id, e.outcome, e.request_id,
+               e.changes_json, e.occurred_at
+        FROM audit_events e
+        LEFT JOIN tenant_memberships m
+            ON m.tenant_id = e.tenant_id AND m.user_id = e.actor_user_id
+        LEFT JOIN users u ON u.id = m.user_id
+        WHERE <include refid="tenantAndFilters"/>
+        ORDER BY e.occurred_at DESC, e.id DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <!-- id 与 tenant_id 同时限定；其他企业的事件按不存在处理。 -->
+    <select id="selectDetailById" resultMap="auditEventDetailMap">
+        SELECT e.id, e.actor_user_id, u.display_name AS actor_name, e.actor_type,
+               e.action, e.object_type, e.object_id, e.outcome, e.request_id,
+               e.changes_json, e.occurred_at
+        FROM audit_events e
+        LEFT JOIN tenant_memberships m
+            ON m.tenant_id = e.tenant_id AND m.user_id = e.actor_user_id
+        LEFT JOIN users u ON u.id = m.user_id
+        WHERE e.tenant_id = #{tenantId}
+          AND e.id = #{id}
+    </select>
+</mapper>

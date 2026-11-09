@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.inventory.mapper.StockReturnMapper">
+    <resultMap id="returnTransactionMap" type="com.equipops.domain.entity.InventoryTransactionEntity">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="warehouseId" column="warehouse_id"/>
+        <result property="requestId" column="request_id"/>
+        <result property="issueTransactionId" column="issue_transaction_id"/>
+        <result property="transactionNo" column="transaction_no"/>
+        <result property="sparePartId" column="spare_part_id"/>
+        <result property="transactionType" column="transaction_type"/>
+        <result property="quantity" column="quantity"/>
+        <result property="referenceType" column="reference_type"/>
+        <result property="referenceText" column="reference_text"/>
+        <result property="workOrderId" column="work_order_id"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="note" column="note"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+    <resultMap id="returnWarehouseMap" type="com.equipops.domain.vo.StockInWarehouseCheckVO">
+        <id property="warehouseId" column="warehouse_id"/>
+        <result property="warehouseEnabled" column="warehouse_enabled"/>
+        <result property="siteId" column="site_id"/>
+        <result property="siteEnabled" column="site_enabled"/>
+    </resultMap>
+    <sql id="returnTransactionColumns">
+        id, tenant_id, warehouse_id, request_id, issue_transaction_id, transaction_no,
+        spare_part_id, transaction_type, quantity, reference_type, reference_text,
+        work_order_id, created_by, note, created_at
+    </sql>
+    <select id="selectNowTenant" resultMap="returnTransactionMap">
+        SELECT <include refid="returnTransactionColumns"/> FROM inventory_transactions
+        WHERE tenant_id = #{tenantId} AND id = #{issueTransactionId}
+    </select>
+    <select id="findByRequest" resultMap="returnTransactionMap">
+        SELECT <include refid="returnTransactionColumns"/> FROM inventory_transactions
+        WHERE tenant_id = #{tenantId} AND request_id = #{requestId}
+    </select>
+    <select id="findByRequestForUpdate" resultMap="returnTransactionMap">
+        SELECT <include refid="returnTransactionColumns"/> FROM inventory_transactions
+        WHERE tenant_id = #{tenantId} AND request_id = #{requestId}
+        FOR UPDATE
+    </select>
+    <!-- 锁顺序与现有库存写入保持一致。 -->
+    <select id="lockWarehouseForReturn" resultMap="returnWarehouseMap">
+        SELECT w.id AS warehouse_id, w.enabled AS warehouse_enabled,
+               s.id AS site_id, s.enabled AS site_enabled
+        FROM warehouses w
+        LEFT JOIN sites s ON s.id = w.site_id AND s.tenant_id = w.tenant_id
+        WHERE w.tenant_id = #{tenantId} AND w.id = #{warehouseId}
+        FOR UPDATE
+    </select>
+    <select id="lockSparePartEnabled" resultType="java.lang.Boolean">
+        SELECT enabled FROM spare_parts
+        WHERE tenant_id = #{tenantId} AND id = #{sparePartId} FOR UPDATE
+    </select>
+    <select id="lockWorkOrderForReturn" resultType="com.equipops.domain.entity.WorkOrderEntity">
+        SELECT id, tenant_id AS tenantId, status, assignee_user_id AS assigneeUserId
+        FROM work_orders
+        WHERE tenant_id = #{tenantId} AND id = #{workOrderId} FOR UPDATE
+    </select>
+    <select id="lockIssueForReturn" resultMap="returnTransactionMap">
+        SELECT <include refid="returnTransactionColumns"/> FROM inventory_transactions
+        WHERE tenant_id = #{tenantId} AND id = #{issueTransactionId} FOR UPDATE
+    </select>
+    <!-- 从已锁定的原领料复制归属；Java只提供可信身份、请求号、原领料ID、数量和备注。 -->
+    <insert id="insertStockReturn" useGeneratedKeys="true" keyProperty="log.id" keyColumn="id">
+        INSERT INTO inventory_transactions (
+            tenant_id, warehouse_id, request_id, transaction_no, spare_part_id,
+            transaction_type, quantity, reference_type, work_order_id, issue_transaction_id, created_by, note
+        )
+        SELECT src.tenant_id, src.warehouse_id, #{log.requestId},
+               CONCAT('RET-', REPLACE(UUID(), '-', '')), src.spare_part_id,
+               'INBOUND', #{log.quantity}, 'WORK_ORDER', src.work_order_id, src.id,
+               #{log.createdBy}, #{log.note,jdbcType=VARCHAR}
+        FROM inventory_transactions src
+        WHERE src.tenant_id = #{log.tenantId} AND src.id = #{log.issueTransactionId}
+          AND src.transaction_type = 'OUTBOUND' AND src.reference_type = 'WORK_ORDER'
+    </insert>
+    <!-- 原领料已加锁；逐行当前读避免使用事务早期快照，包括自己的新退料。 -->
+    <select id="selectReturnedQuantitiesForUpdate" resultType="java.math.BigDecimal">
+        SELECT quantity FROM inventory_transactions
+        WHERE tenant_id = #{tenantId} AND issue_transaction_id = #{issueTransactionId}
+          AND transaction_type = 'INBOUND' AND reference_type = 'WORK_ORDER'
+        FOR UPDATE
+    </select>
+    <update id="increaseStock">
+        UPDATE warehouse_stock SET quantity = quantity + #{quantity}
+        WHERE tenant_id = #{tenantId} AND warehouse_id = #{warehouseId} AND spare_part_id = #{sparePartId}
+          AND quantity &lt;= 99999999999.999 - #{quantity}
+    </update>
+    <update id="increaseReturnedQuantity">
+        UPDATE work_order_parts wp
+        JOIN work_orders wo ON wo.id = wp.work_order_id
+        JOIN spare_parts sp ON sp.id = wp.spare_part_id AND sp.tenant_id = wo.tenant_id
+        SET wp.returned_quantity = wp.returned_quantity + #{quantity}
+        WHERE wo.tenant_id = #{tenantId} AND wp.work_order_id = #{workOrderId} AND wp.spare_part_id = #{sparePartId}
+          AND wp.returned_quantity &lt;= wp.issued_quantity - #{quantity}
+    </update>
+    <select id="findById" resultMap="returnTransactionMap">
+        SELECT <include refid="returnTransactionColumns"/> FROM inventory_transactions
+        WHERE tenant_id = #{tenantId} AND id = #{id}
+    </select>
+</mapper>

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.statistics.mapper.WorkOrderStatisticsMapper">
+    <resultMap id="dailyTrendView" type="com.equipops.domain.vo.WorkOrderDailyTrendVO">
+        <id property="date" column="stat_date"/>
+        <result property="createdCount" column="created_count"/>
+        <result property="completedCount" column="completed_count"/>
+    </resultMap>
+    <!-- 两个口径独立筛选，完成数不受创建日期限制。无任何记录的日期由Service补零。 -->
+    <select id="selectDailyTrend" resultMap="dailyTrendView">
+        SELECT stat_date, SUM(created_count) AS created_count, SUM(completed_count) AS completed_count
+        FROM (
+            SELECT DATE(created_at) AS stat_date, COUNT(*) AS created_count, 0 AS completed_count
+            FROM work_orders
+            WHERE tenant_id = #{tenantId}
+              AND created_at &gt;= #{startTime} AND created_at &lt; #{endTime}
+            GROUP BY DATE(created_at)
+            UNION ALL
+            SELECT DATE(completed_at) AS stat_date, 0 AS created_count, COUNT(*) AS completed_count
+            FROM work_orders
+            WHERE tenant_id = #{tenantId}
+              AND completed_at &gt;= #{startTime} AND completed_at &lt; #{endTime}
+            GROUP BY DATE(completed_at)
+        ) daily_counts
+        GROUP BY stat_date
+        ORDER BY stat_date ASC
+    </select>
+    <resultMap id="overdueSummaryView" type="com.equipops.domain.vo.WorkOrderOverdueSummaryVO">
+        <result property="asOf" column="as_of"/>
+        <result property="overdueCount" column="overdue_count"/>
+        <result property="pendingOverdueCount" column="pending_overdue_count"/>
+        <result property="inProgressOverdueCount" column="in_progress_overdue_count"/>
+        <result property="awaitingAcceptanceOverdueCount" column="awaiting_acceptance_overdue_count"/>
+        <result property="withoutDeadlineCount" column="without_deadline_count"/>
+    </resultMap>
+    <!-- 截止时间严格早于asOf才逾期；无截止时间单独计数，不限制创建日期。 -->
+    <select id="selectOverdueSummary" resultMap="overdueSummaryView">
+        SELECT #{asOf} AS as_of,
+               COALESCE(SUM(CASE WHEN due_at &lt; #{asOf} THEN 1 ELSE 0 END), 0) AS overdue_count,
+               COALESCE(SUM(CASE WHEN status = 'PENDING' AND due_at &lt; #{asOf} THEN 1 ELSE 0 END), 0) AS pending_overdue_count,
+               COALESCE(SUM(CASE WHEN status = 'IN_PROGRESS' AND due_at &lt; #{asOf} THEN 1 ELSE 0 END), 0) AS in_progress_overdue_count,
+               COALESCE(SUM(CASE WHEN status = 'AWAITING_ACCEPTANCE' AND due_at &lt; #{asOf} THEN 1 ELSE 0 END), 0) AS awaiting_acceptance_overdue_count,
+               COALESCE(SUM(CASE WHEN due_at IS NULL THEN 1 ELSE 0 END), 0) AS without_deadline_count
+        FROM work_orders
+        WHERE tenant_id = #{tenantId}
+          AND status IN ('PENDING', 'IN_PROGRESS', 'AWAITING_ACCEPTANCE')
+    </select>
+</mapper>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.operations.mapper.AlertProgressMapper">
+ <select id="selectRules" resultType="com.equipops.domain.entity.AlertRuleEntity" timeout="10">
+  SELECT r.* FROM alert_rules r LEFT JOIN alert_scan_progress p ON p.tenant_id=r.tenant_id AND p.rule_id=r.id
+  WHERE r.enabled=1 AND r.rule_code='EXPORT_TASK_SYSTEM_FAILURE'
+  AND r.threshold_count BETWEEN 1 AND 10000 AND r.window_seconds BETWEEN 1 AND 86400 AND r.cooldown_seconds BETWEEN 0 AND 86400
+  AND EXISTS(SELECT 1 FROM tenants t JOIN tenant_memberships m ON m.tenant_id=t.id
+   JOIN users u ON u.id=m.user_id JOIN tenant_member_roles mr ON mr.tenant_id=m.tenant_id AND mr.membership_id=m.id
+   JOIN roles ar ON ar.id=mr.role_id WHERE t.id=r.tenant_id AND u.id=r.owner_user_id
+    AND t.enabled=1 AND m.enabled=1 AND u.enabled=1 AND ar.role_code='TENANT_ADMIN')
+  ORDER BY COALESCE(p.updated_at,'1970-01-01'),r.id
+ </select>
+ <select id="selectProgress" resultType="com.equipops.domain.entity.AlertScanProgressEntity" timeout="10">
+  SELECT * FROM alert_scan_progress WHERE tenant_id=#{tenantId} AND rule_id=#{ruleId}
+ </select>
+ <select id="lockProgress" resultType="com.equipops.domain.entity.AlertScanProgressEntity" timeout="10">
+  SELECT * FROM alert_scan_progress WHERE tenant_id=#{tenantId} AND rule_id=#{ruleId} FOR UPDATE
+ </select>
+ <insert id="insertProgress" timeout="10">
+  INSERT INTO alert_scan_progress(tenant_id,rule_id,rule_version,window_start,window_end,last_task_id,version)
+  VALUES(#{progress.tenantId},#{progress.ruleId},#{progress.ruleVersion},#{progress.windowStart},#{progress.windowEnd},0,0)
+ </insert>
+ <update id="saveProgress" timeout="10">
+  UPDATE alert_scan_progress SET rule_version=#{progress.ruleVersion},window_start=#{progress.windowStart},
+   window_end=#{progress.windowEnd},last_finished_at=#{progress.lastFinishedAt},last_task_id=#{progress.lastTaskId},
+   completed=#{progress.completed},version=version+1,updated_at=CURRENT_TIMESTAMP(6)
+  WHERE tenant_id=#{progress.tenantId} AND rule_id=#{progress.ruleId} AND version=#{expectedVersion}
+ </update>
+</mapper>

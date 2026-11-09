@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.workorder.mapper.WorkOrderLogMapper">
+    <resultMap id="workOrderLogMap" type="com.equipops.domain.entity.WorkOrderLogEntity">
+        <id property="id" column="id"/>
+        <result property="workOrderId" column="work_order_id"/>
+        <result property="eventType" column="event_type"/>
+        <result property="fromStatus" column="from_status"/>
+        <result property="toStatus" column="to_status"/>
+        <result property="title" column="title"/>
+        <result property="detail" column="detail"/>
+        <result property="actorUserId" column="actor_user_id"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <!-- 报修、派单及独立日志接口复用此查询；通过父工单同时限定企业范围。 -->
+    <select id="selectByWorkOrderId" resultMap="workOrderLogMap">
+        SELECT l.id, l.work_order_id, l.event_type, l.from_status, l.to_status,
+               l.title, l.detail, l.actor_user_id, l.created_at
+        FROM work_order_logs l
+        INNER JOIN work_orders w ON w.id = l.work_order_id
+        WHERE w.tenant_id = #{tenantId}
+          AND l.work_order_id = #{workOrderId}
+        ORDER BY l.created_at ASC, l.id ASC
+    </select>
+    <!-- VO 映射沿用原日志字段，只补显示名；不把显示名写入数据库实体。 -->
+    <resultMap id="workOrderLogViewMap" type="com.equipops.domain.vo.WorkOrderLogVO"
+               extends="workOrderLogMap">
+        <result property="actorName" column="actor_name"/>
+    </resultMap>
+
+    <!-- 工单控制企业范围，成员关系控制姓名可见性；停用或缺失关联不隐藏历史日志。 -->
+    <select id="selectViewByWorkOrderId" resultMap="workOrderLogViewMap">
+        SELECT l.id, l.work_order_id, l.event_type, l.from_status, l.to_status,
+               l.title, l.detail, l.actor_user_id, l.created_at,
+               u.display_name AS actor_name
+        FROM work_order_logs l
+        INNER JOIN work_orders w ON w.id = l.work_order_id
+        LEFT JOIN tenant_memberships m
+            ON m.tenant_id = w.tenant_id AND m.user_id = l.actor_user_id
+        LEFT JOIN users u ON u.id = m.user_id
+        WHERE w.tenant_id = #{tenantId}
+          AND l.work_order_id = #{workOrderId}
+        ORDER BY l.created_at ASC, l.id ASC
+    </select>
+</mapper>

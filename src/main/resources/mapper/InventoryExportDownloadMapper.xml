@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.inventory.mapper.InventoryExportDownloadMapper">
+    <resultMap id="downloadRecord" type="com.inventory.export.InventoryExportDownloadRecord">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="status" column="status" javaType="com.equipops.domain.enums.InventoryExportStatus" typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+        <result property="storageKey" column="storage_key"/>
+        <result property="runToken" column="run_token"/>
+        <result property="fileSize" column="file_size"/>
+        <result property="expired" column="expired"/>
+    </resultMap>
+    <!-- 内部任务信息仅在已限定企业和创建人的查询中取得；过期判断使用数据库时间。 -->
+    <select id="selectOwnDownload" resultMap="downloadRecord" timeout="10">
+        SELECT id,tenant_id,created_by,status,storage_key,run_token,file_size,
+               (expires_at IS NULL OR expires_at &lt;= CURRENT_TIMESTAMP(6)) AS expired
+        FROM inventory_export_tasks
+        WHERE tenant_id=#{tenantId} AND created_by=#{userId} AND id=#{taskId}
+    </select>
+    <sql id="sameFile">
+        id=#{task.id} AND tenant_id=#{task.tenantId} AND created_by=#{task.createdBy}
+        AND run_token=#{task.runToken} AND storage_key=#{task.storageKey}
+        AND status='SUCCEEDED' AND expires_at &gt; CURRENT_TIMESTAMP(6)
+    </sql>
+    <!-- 文件句柄已打开后，重新确认权限和文件发布条件，避免使用旧授权快照。 -->
+    <select id="canDownload" resultType="boolean" timeout="10">
+        SELECT COUNT(*) &gt; 0 FROM inventory_export_tasks WHERE <include refid="sameFile"/>
+        AND EXISTS (SELECT 1 FROM users u
+            JOIN tenant_memberships m ON m.user_id=u.id
+            JOIN tenants te ON te.id=m.tenant_id
+            WHERE u.id=#{task.createdBy} AND te.id=#{task.tenantId}
+              AND u.enabled=1 AND m.enabled=1 AND te.enabled=1)
+    </select>
+    <!-- 仅记录缺失错误，不把成功终态改为FAILED，也不泄露真实服务器路径。 -->
+    <update id="markFileMissing" timeout="10">
+        UPDATE inventory_export_tasks SET error_code='FILE_MISSING',
+            error_message='导出文件不存在或不可用，请重新导出',updated_at=CURRENT_TIMESTAMP(6)
+        WHERE <include refid="sameFile"/>
+    </update>
+</mapper>

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.inventory.mapper.InventoryTransactionMapper">
+    <!-- 显式映射原流水字段和联表字段，不依赖下划线自动转换配置。 -->
+    <resultMap id="transactionDetailsMap" type="com.equipops.domain.vo.InventoryTransactionVO">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="warehouseId" column="warehouse_id"/>
+        <result property="requestId" column="request_id"/>
+        <result property="issueTransactionId" column="issue_transaction_id"/>
+        <result property="transactionNo" column="transaction_no"/>
+        <result property="sparePartId" column="spare_part_id"/>
+        <result property="transactionType" column="transaction_type"/>
+        <result property="quantity" column="quantity"/>
+        <result property="referenceType" column="reference_type"/>
+        <result property="referenceText" column="reference_text"/>
+        <result property="workOrderId" column="work_order_id"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="note" column="note"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="warehouseCode" column="warehouse_code"/>
+        <result property="warehouseName" column="warehouse_name"/>
+        <result property="partCode" column="part_code"/>
+        <result property="partName" column="part_name"/>
+        <result property="workOrderNo" column="work_order_no"/>
+    </resultMap>
+
+    <!-- 列表和详情共用字段及关联，保持历史兼容和企业隔离一致。 -->
+    <sql id="transactionDetailsQuery">
+        SELECT t.id, t.tenant_id, t.warehouse_id, t.request_id,
+               t.issue_transaction_id, t.transaction_no, t.spare_part_id,
+               t.transaction_type, t.quantity, t.reference_type, t.reference_text,
+               t.work_order_id, t.created_by, t.note, t.created_at,
+               w.warehouse_code, w.name AS warehouse_name,
+               p.part_code, p.name AS part_name, wo.order_no AS work_order_no
+        FROM inventory_transactions t
+        <!-- 企业条件放在 ON 中：关联不可见时名称为空，仍保留本企业流水。 -->
+        LEFT JOIN warehouses w
+            ON w.id = t.warehouse_id AND w.tenant_id = t.tenant_id
+        LEFT JOIN spare_parts p
+            ON p.id = t.spare_part_id AND p.tenant_id = t.tenant_id
+        LEFT JOIN work_orders wo
+            ON wo.id = t.work_order_id AND wo.tenant_id = t.tenant_id
+    </sql>
+
+    <!-- 只查询原始流水；不修改库存，不因关联对象停用或缺失而隐藏历史流水。 -->
+    <select id="selectPageWithDetails" resultMap="transactionDetailsMap">
+        <include refid="transactionDetailsQuery"/>
+        WHERE t.tenant_id = #{tenantId}
+        <if test="query.warehouseId != null">
+            AND t.warehouse_id = #{query.warehouseId}
+        </if>
+        <if test="query.sparePartId != null">
+            AND t.spare_part_id = #{query.sparePartId}
+        </if>
+        <if test="query.workOrderId != null">
+            AND t.work_order_id = #{query.workOrderId}
+        </if>
+        <if test="query.transactionType != null">
+            AND t.transaction_type = #{query.transactionType}
+        </if>
+        <if test="query.referenceType != null">
+            AND t.reference_type = #{query.referenceType}
+        </if>
+        <if test="query.startTime != null">
+            AND t.created_at &gt;= #{query.startTime}
+        </if>
+        <if test="query.endTime != null">
+            AND t.created_at &lt;= #{query.endTime}
+        </if>
+        <!-- 稳定排序；分页及 COUNT 由已有 MyBatis-Plus 分页插件处理。 -->
+        ORDER BY t.created_at DESC, t.id DESC
+    </select>
+    <!-- 无记录返回null，由业务层统一转换为404；不要求关联资源仍启用。 -->
+    <select id="selectDetailWithDetails" resultMap="transactionDetailsMap">
+        <include refid="transactionDetailsQuery"/>
+        WHERE t.tenant_id = #{tenantId}
+          AND t.id = #{id}
+    </select>
+</mapper>

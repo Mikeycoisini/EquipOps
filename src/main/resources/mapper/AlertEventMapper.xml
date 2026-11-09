@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.operations.mapper.AlertEventMapper">
+ <resultMap id="publicEvent" type="com.equipops.domain.vo.AlertEventVO">
+  <id property="id" column="id"/>
+  <result property="ruleId" column="ruleId"/>
+  <result property="ruleCode" column="ruleCode" javaType="com.equipops.domain.enums.AlertRuleCode" typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+  <result property="errorCode" column="errorCode"/>
+  <result property="status" column="status" javaType="com.equipops.domain.enums.AlertEventStatus" typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+  <result property="recoveryStatus" column="recoveryStatus" javaType="com.equipops.domain.enums.AlertRecoveryStatus" typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+  <result property="occurrenceCount" column="occurrenceCount"/>
+  <result property="ownerUserId" column="ownerUserId"/>
+  <result property="firstSeenAt" column="firstSeenAt"/>
+  <result property="lastSeenAt" column="lastSeenAt"/>
+  <result property="acknowledgedAt" column="acknowledgedAt"/>
+  <result property="recoveredAt" column="recoveredAt"/>
+  <result property="resolvedAt" column="resolvedAt"/>
+  <result property="version" column="version"/>
+ </resultMap>
+ <sql id="publicColumns">e.id AS id, e.rule_id AS ruleId, r.rule_code AS ruleCode, e.error_code AS errorCode, e.status AS status, e.recovery_status AS recoveryStatus, e.occurrence_count AS occurrenceCount, e.owner_user_id AS ownerUserId, e.first_seen_at AS firstSeenAt, e.last_seen_at AS lastSeenAt, e.acknowledged_at AS acknowledgedAt, e.recovered_at AS recoveredAt, e.resolved_at AS resolvedAt, e.version AS version</sql>
+ <sql id="tenantJoin">
+  FROM alert_events e JOIN alert_rules r ON r.id=e.rule_id AND r.tenant_id=e.tenant_id
+  WHERE e.tenant_id=#{tenantId} AND r.tenant_id=#{tenantId}
+ </sql>
+ <select id="selectEventPage" resultMap="publicEvent">
+  SELECT <include refid="publicColumns"/> <include refid="tenantJoin"/>
+  <if test="query.status != null">AND e.status=#{query.status,javaType=com.equipops.domain.enums.AlertEventStatus,typeHandler=org.apache.ibatis.type.EnumTypeHandler}</if>
+  <if test="query.recoveryStatus != null">AND e.recovery_status=#{query.recoveryStatus,javaType=com.equipops.domain.enums.AlertRecoveryStatus,typeHandler=org.apache.ibatis.type.EnumTypeHandler}</if>
+  <if test="query.ruleId != null">AND e.rule_id=#{query.ruleId}</if>
+  ORDER BY e.created_at DESC,e.id DESC
+ </select>
+ <select id="selectEventDetail" resultMap="publicEvent">
+  SELECT <include refid="publicColumns"/> <include refid="tenantJoin"/> AND e.id=#{id}
+ </select>
+</mapper>

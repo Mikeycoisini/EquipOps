@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.inventory.mapper.StockIssueMapper">
+    <select id="lockSparePartEnabled" resultType="java.lang.Boolean">
+        SELECT enabled
+        FROM spare_parts
+        WHERE tenant_id = #{tenantId}
+        AND id = #{sparePartId}
+        FOR UPDATE
+    </select>
+    <!-- 查询并锁定当前企业的仓库及所属厂区。 -->
+    <select id="lockWarehouseForIssue"
+            resultType="com.equipops.domain.vo.StockInWarehouseCheckVO">
+        SELECT w.id AS warehouseId,
+        w.enabled AS warehouseEnabled,
+        s.id AS siteId,
+        s.enabled AS siteEnabled
+        FROM warehouses w
+        LEFT JOIN sites s
+        ON s.id = w.site_id
+        AND s.tenant_id = w.tenant_id
+        WHERE w.tenant_id = #{tenantId}
+        AND w.id = #{warehouseId}
+        FOR UPDATE
+    </select>
+
+    <resultMap id="issueTransactionMap" type="com.equipops.domain.entity.InventoryTransactionEntity">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="warehouseId" column="warehouse_id"/>
+        <result property="requestId" column="request_id"/>
+        <result property="transactionNo" column="transaction_no"/>
+        <result property="sparePartId" column="spare_part_id"/>
+        <result property="transactionType" column="transaction_type"/>
+        <result property="quantity" column="quantity"/>
+        <result property="referenceType" column="reference_type"/>
+        <result property="referenceText" column="reference_text"/>
+        <result property="workOrderId" column="work_order_id"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="note" column="note"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+    <sql id="issueTransactionColumns">
+        id, tenant_id, warehouse_id, request_id, transaction_no, spare_part_id,
+        transaction_type, quantity, reference_type, reference_text, work_order_id,
+        created_by, note, created_at
+    </sql>
+
+    <!-- 第5步：固定为工单领料，企业和操作人由业务层可信上下文提供。 -->
+    <insert id="insertStockIssue" useGeneratedKeys="true" keyProperty="log.id" keyColumn="id">
+        INSERT INTO inventory_transactions (
+            tenant_id, warehouse_id, request_id, transaction_no, spare_part_id,
+            transaction_type, quantity, reference_type, work_order_id, created_by, note
+        ) VALUES (
+            #{log.tenantId}, #{log.warehouseId}, #{log.requestId}, #{log.transactionNo}, #{log.sparePartId},
+            'OUTBOUND', #{log.quantity}, 'WORK_ORDER', #{log.workOrderId}, #{log.createdBy}, #{log.note,jdbcType=VARCHAR}
+        )
+    </insert>
+    <!-- 唯一键冲突后使用当前读，避免早期普通查询快照漏掉并发成功流水。 -->
+    <select id="findByRequestForUpdate" resultMap="issueTransactionMap">
+        SELECT <include refid="issueTransactionColumns"/>
+        FROM inventory_transactions
+        WHERE tenant_id = #{tenantId} AND request_id = #{requestId}
+        FOR UPDATE
+    </select>
+
+    <!-- 第6步：扣减与足额检查在同一条 SQL 完成，不允许负库存。 -->
+    <update id="decreaseStock">
+        UPDATE warehouse_stock SET quantity = quantity - #{quantity}
+        WHERE tenant_id = #{tenantId} AND warehouse_id = #{warehouseId} AND spare_part_id = #{sparePartId}
+          AND quantity &gt;= #{quantity}
+    </update>
+
+    <!-- 第7步：双方都在当前企业才建立用料行；已有行保留所有业务数量。 -->
+    <insert id="ensureWorkOrderPartRow">
+        INSERT INTO work_order_parts (
+            work_order_id, spare_part_id, planned_quantity, issued_quantity, returned_quantity
+        )
+        SELECT wo.id, sp.id, 0, 0, 0
+        FROM work_orders wo
+        JOIN spare_parts sp ON sp.id = #{sparePartId} AND sp.tenant_id = wo.tenant_id
+        WHERE wo.tenant_id = #{tenantId} AND wo.id = #{workOrderId}
+        ON DUPLICATE KEY UPDATE id = work_order_parts.id
+    </insert>
+    <update id="increaseIssuedQuantity">
+        UPDATE work_order_parts wp
+        JOIN work_orders wo ON wo.id = wp.work_order_id
+        JOIN spare_parts sp ON sp.id = wp.spare_part_id AND sp.tenant_id = wo.tenant_id
+        SET wp.issued_quantity = wp.issued_quantity + #{quantity}
+        WHERE wo.tenant_id = #{tenantId} AND wp.work_order_id = #{workOrderId} AND wp.spare_part_id = #{sparePartId}
+          AND wp.issued_quantity &lt;= 99999999999.999 - #{quantity}
+    </update>
+    <select id="findById" resultMap="issueTransactionMap">
+        SELECT <include refid="issueTransactionColumns"/>
+        FROM inventory_transactions WHERE tenant_id = #{tenantId} AND id = #{id}
+    </select>
+
+</mapper>

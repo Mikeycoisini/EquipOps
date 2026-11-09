@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.inventory.mapper.InventoryExportTaskMapper">
+    <!-- 三个身份条件在SQL侧完成，不先查全量任务后在Java中过滤。 -->
+    <resultMap id="taskVo" type="com.equipops.domain.vo.InventoryExportTaskVO">
+        <id property="id" column="id"/>
+        <result property="warehouseId" column="warehouse_id"/>
+        <result property="sparePartId" column="spare_part_id"/>
+        <result property="workOrderId" column="work_order_id"/>
+        <result property="transactionType" column="transaction_type"
+                javaType="com.equipops.domain.enums.InventoryTransactionType" typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+        <result property="referenceType" column="reference_type"
+                javaType="com.equipops.domain.enums.InventoryReferenceType" typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+        <result property="startTime" column="start_time"/>
+        <result property="endTime" column="end_time"/>
+        <result property="status" column="status"
+                javaType="com.equipops.domain.enums.InventoryExportStatus" typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+        <result property="processedRows" column="processed_rows"/>
+        <result property="fileName" column="file_name"/>
+        <result property="fileSize" column="file_size"/>
+        <result property="errorCode" column="error_code"/>
+        <result property="errorMessage" column="error_message"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="startedAt" column="started_at"/>
+        <result property="finishedAt" column="finished_at"/>
+        <result property="expiresAt" column="expires_at"/>
+    </resultMap>
+
+    <!-- 成员唯一键(tenant_id,user_id)使两个实例争用同一条锁。 -->
+    <select id="selectEnabledMembershipForUpdate" resultType="java.lang.Long">
+        SELECT id FROM tenant_memberships
+        WHERE tenant_id = #{tenantId} AND user_id = #{userId} AND enabled = 1
+        FOR UPDATE
+    </select>
+
+    <!-- 同一事务内必须先锁成员；这里使用锁定读，不使用普通COUNT快照。 -->
+    <select id="selectActiveTaskIdsForUpdate" resultType="java.lang.Long">
+        SELECT id FROM inventory_export_tasks
+        WHERE tenant_id = #{tenantId} AND created_by = #{userId}
+          AND status IN ('QUEUED', 'RUNNING', 'CANCEL_REQUESTED')
+        ORDER BY id
+        FOR UPDATE
+    </select>
+
+    <!-- upper_bound_id、started_at等由后续执行阶段填写，本步不伪造。 -->
+    <insert id="insertQueuedTask" useGeneratedKeys="true" keyProperty="task.id" keyColumn="id">
+        INSERT INTO inventory_export_tasks (
+            tenant_id, created_by, warehouse_id, spare_part_id, work_order_id,
+            transaction_type, reference_type, start_time, end_time,
+            status, processed_rows, owner_instance_id, run_token, lease_until,
+            created_at, updated_at
+        ) VALUES (
+            #{tenantId}, #{userId}, #{request.warehouseId}, #{request.sparePartId}, #{request.workOrderId},
+            #{request.transactionType,javaType=com.equipops.domain.enums.InventoryTransactionType,typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+            #{request.referenceType,javaType=com.equipops.domain.enums.InventoryReferenceType,typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+            #{request.startTime}, #{request.endTime},
+            'QUEUED', 0, #{task.ownerInstanceId}, #{task.runToken},
+            DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 30 SECOND),
+            CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+        )
+    </insert>
+
+    <select id="selectOwnTask" resultMap="taskVo">
+        SELECT id, warehouse_id, spare_part_id, work_order_id,
+               transaction_type, reference_type, start_time, end_time,
+               status, processed_rows, file_name, file_size, error_code, error_message,
+               created_at, started_at, finished_at, expires_at
+        FROM inventory_export_tasks
+        WHERE tenant_id = #{tenantId} AND created_by = #{userId} AND id = #{taskId}
+    </select>
+
+    <!-- 当前读：等待并发发布完成后再判断状态，不使用旧快照覆盖终态。 -->
+    <select id="selectOwnTaskForUpdate" resultMap="taskVo" timeout="10">
+        SELECT id, warehouse_id, spare_part_id, work_order_id,
+               transaction_type, reference_type, start_time, end_time,
+               status, processed_rows, file_name, file_size, error_code, error_message,
+               created_at, started_at, finished_at, expires_at
+        FROM inventory_export_tasks
+        WHERE tenant_id = #{tenantId} AND created_by = #{userId} AND id = #{taskId}
+        FOR UPDATE
+    </select>
+
+    <!-- 结束时间和原因先按旧状态计算，最后赋status，避免MySQL从左向右赋值误判排队状态。 -->
+    <update id="requestCancelOwnTask" timeout="10">
+        UPDATE inventory_export_tasks SET
+            finished_at = CASE WHEN status = 'QUEUED' THEN CURRENT_TIMESTAMP(6) ELSE finished_at END,
+            error_code = CASE WHEN status = 'QUEUED' THEN 'CANCELLED' ELSE error_code END,
+            error_message = CASE WHEN status = 'QUEUED' THEN '导出已取消' ELSE error_message END,
+            updated_at = CURRENT_TIMESTAMP(6),
+            status = CASE WHEN status = 'QUEUED' THEN 'CANCELLED' ELSE 'CANCEL_REQUESTED' END
+        WHERE tenant_id = #{tenantId} AND created_by = #{userId} AND id = #{taskId}
+          AND status IN ('QUEUED','RUNNING')
+          AND EXISTS (SELECT 1 FROM users u
+              JOIN tenant_memberships m ON m.user_id = u.id
+              JOIN tenants te ON te.id = m.tenant_id
+              JOIN tenant_member_roles mr ON mr.tenant_id = m.tenant_id AND mr.membership_id = m.id
+              JOIN roles r ON r.id = mr.role_id
+              WHERE u.id = #{userId} AND te.id = #{tenantId}
+                AND u.enabled = 1 AND m.enabled = 1 AND te.enabled = 1
+                AND r.role_code = 'TENANT_ADMIN')
+    </update>
+
+    <!-- 后台身份来自数据库任务，而不是请求Session；普通有效成员即可导出。 -->
+    <sql id="accessExists">
+        EXISTS (SELECT 1 FROM users u
+            JOIN tenant_memberships m ON m.user_id = u.id
+            JOIN tenants te ON te.id = m.tenant_id
+            WHERE u.id = #{task.createdBy} AND te.id = #{task.tenantId}
+              AND u.enabled = 1 AND m.enabled = 1 AND te.enabled = 1)
+    </sql>
+    <select id="hasExportAccess" resultType="boolean" timeout="10">
+        SELECT <include refid="accessExists"/>
+    </select>
+    <!-- 每次状态写入均校验归属、实例、令牌和数据库时间；过期租约不能复活。 -->
+    <sql id="ownedLive">
+        id = #{task.id} AND tenant_id = #{task.tenantId} AND created_by = #{task.createdBy}
+        AND owner_instance_id = #{task.ownerInstanceId} AND run_token = #{task.runToken}
+        AND lease_until &gt; CURRENT_TIMESTAMP(6)
+    </sql>
+    <sql id="runningLive">
+        <include refid="ownedLive"/> AND status = 'RUNNING' AND deadline_at &gt; CURRENT_TIMESTAMP(6)
+    </sql>
+    <select id="isOwnedQueued" resultType="boolean" timeout="10">
+        SELECT COUNT(*) &gt; 0 FROM inventory_export_tasks
+        WHERE <include refid="ownedLive"/> AND status = 'QUEUED'
+    </select>
+    <update id="startRunning" timeout="10">
+        UPDATE inventory_export_tasks SET status = 'RUNNING', started_at = CURRENT_TIMESTAMP(6),
+            deadline_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 5 MINUTE), updated_at = CURRENT_TIMESTAMP(6)
+        WHERE <include refid="ownedLive"/> AND status = 'QUEUED' AND <include refid="accessExists"/>
+    </update>
+    <select id="selectUpperBound" resultType="long" timeout="10">
+        SELECT COALESCE(MAX(id), 0) FROM inventory_transactions WHERE tenant_id = #{tenantId}
+    </select>
+    <update id="saveUpperBound" timeout="10">
+        UPDATE inventory_export_tasks SET upper_bound_id = #{upperBound}, updated_at = CURRENT_TIMESTAMP(6)
+        WHERE <include refid="runningLive"/>
+    </update>
+    <select id="isRunningLive" resultType="boolean" timeout="10">
+        SELECT COUNT(*) &gt; 0 FROM inventory_export_tasks WHERE <include refid="runningLive"/>
+    </select>
+    <!-- 复用现有带企业条件的联表与VO映射；不调用分页页面接口。 -->
+    <select id="selectExportBatch" resultMap="com.inventory.mapper.InventoryTransactionMapper.transactionDetailsMap" timeout="15">
+        <include refid="com.inventory.mapper.InventoryTransactionMapper.transactionDetailsQuery"/>
+        WHERE t.tenant_id = #{task.tenantId} AND t.id &gt; #{lastId} AND t.id &lt;= #{task.upperBoundId}
+        <if test="task.warehouseId != null">AND t.warehouse_id = #{task.warehouseId}</if>
+        <if test="task.sparePartId != null">AND t.spare_part_id = #{task.sparePartId}</if>
+        <if test="task.workOrderId != null">AND t.work_order_id = #{task.workOrderId}</if>
+        <if test="task.transactionType != null">AND t.transaction_type = #{task.transactionType}</if>
+        <if test="task.referenceType != null">AND t.reference_type = #{task.referenceType}</if>
+        <if test="task.startTime != null">AND t.created_at &gt;= #{task.startTime}</if>
+        <if test="task.endTime != null">AND t.created_at &lt;= #{task.endTime}</if>
+        ORDER BY t.id ASC LIMIT 1000
+    </select>
+    <update id="updateProgress" timeout="10">
+        UPDATE inventory_export_tasks SET processed_rows = #{rows}, updated_at = CURRENT_TIMESTAMP(6)
+        WHERE <include refid="runningLive"/>
+    </update>
+    <update id="publishSuccess" timeout="10">
+        UPDATE inventory_export_tasks SET status = 'SUCCEEDED', storage_key = #{storageKey}, file_name = #{fileName},
+            file_size = #{fileSize}, processed_rows = #{rows}, finished_at = CURRENT_TIMESTAMP(6),
+            expires_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR), updated_at = CURRENT_TIMESTAMP(6)
+        WHERE <include refid="runningLive"/> AND <include refid="accessExists"/>
+    </update>
+    <update id="rejectQueued" timeout="10">
+        UPDATE inventory_export_tasks SET status = 'REJECTED', error_code = 'EXECUTOR_FULL',
+            error_message = '执行器容量不足，请稍后重试', finished_at = CURRENT_TIMESTAMP(6), updated_at = CURRENT_TIMESTAMP(6)
+        WHERE <include refid="ownedLive"/> AND status = 'QUEUED'
+    </update>
+    <update id="finishUnsuccessful" timeout="10">
+        UPDATE inventory_export_tasks SET
+            error_code = CASE WHEN status = 'CANCEL_REQUESTED' THEN 'CANCELLED'
+                WHEN deadline_at &lt;= CURRENT_TIMESTAMP(6) THEN 'TIMEOUT' ELSE #{code} END,
+            error_message = CASE WHEN status = 'CANCEL_REQUESTED' THEN '导出已取消'
+                WHEN deadline_at &lt;= CURRENT_TIMESTAMP(6) THEN '导出超时，请缩小筛选范围' ELSE #{message} END,
+            status = CASE WHEN status = 'CANCEL_REQUESTED' THEN 'CANCELLED' ELSE 'FAILED' END,
+            finished_at = CURRENT_TIMESTAMP(6), updated_at = CURRENT_TIMESTAMP(6)
+        WHERE <include refid="ownedLive"/> AND status IN ('QUEUED','RUNNING','CANCEL_REQUESTED')
+    </update>
+    <update id="renewOwnedLeases" timeout="10">
+        UPDATE inventory_export_tasks SET lease_until = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 30 SECOND),
+            updated_at = CURRENT_TIMESTAMP(6)
+        WHERE <include refid="ownedLive"/> AND status IN ('QUEUED','RUNNING')
+          AND lease_until &gt; CURRENT_TIMESTAMP(6)
+          AND (status = 'QUEUED' OR deadline_at &gt; CURRENT_TIMESTAMP(6))
+    </update>
+    <!-- 维护器可回收任意实例已超时/失联的任务，仍须以数据库条件竞争终态。 -->
+    <update id="reapExpiredTasks" timeout="10">
+        UPDATE inventory_export_tasks SET
+            error_code = CASE WHEN status = 'CANCEL_REQUESTED' THEN 'CANCELLED'
+                WHEN deadline_at &lt;= CURRENT_TIMESTAMP(6) THEN 'TIMEOUT' ELSE 'WORKER_LOST' END,
+            error_message = CASE WHEN status = 'CANCEL_REQUESTED' THEN '导出已取消'
+                WHEN deadline_at &lt;= CURRENT_TIMESTAMP(6) THEN '导出超时，请缩小筛选范围'
+                ELSE '执行实例失联，请重新提交' END,
+            status = CASE WHEN status = 'CANCEL_REQUESTED' THEN 'CANCELLED' ELSE 'FAILED' END,
+            finished_at = CURRENT_TIMESTAMP(6), updated_at = CURRENT_TIMESTAMP(6)
+        WHERE status IN ('QUEUED','RUNNING','CANCEL_REQUESTED')
+          AND (lease_until &lt;= CURRENT_TIMESTAMP(6) OR deadline_at &lt;= CURRENT_TIMESTAMP(6) OR status = 'CANCEL_REQUESTED')
+    </update>
+    <update id="expireFiles" timeout="10">
+        UPDATE inventory_export_tasks SET status = 'EXPIRED', updated_at = CURRENT_TIMESTAMP(6)
+        WHERE status = 'SUCCEEDED' AND expires_at &lt;= CURRENT_TIMESTAMP(6)
+    </update>
+    <select id="shouldKeepFiles" resultType="boolean" timeout="10">
+        SELECT COUNT(*) &gt; 0 FROM inventory_export_tasks WHERE id = #{taskId} AND run_token = #{runToken}
+        AND ((status IN ('QUEUED','RUNNING','CANCEL_REQUESTED') AND lease_until &gt; CURRENT_TIMESTAMP(6))
+          OR (status = 'SUCCEEDED' AND expires_at &gt; CURRENT_TIMESTAMP(6)))
+    </select>
+    <!-- 分页记录与插件生成的COUNT均在SQL限定企业和本人，不按角色扩大范围。 -->
+    <select id="selectOwnTaskPage" resultMap="taskVo" timeout="10">
+        SELECT id, warehouse_id, spare_part_id, work_order_id,
+               transaction_type, reference_type, start_time, end_time,
+               status, processed_rows, file_name, file_size, error_code, error_message,
+               created_at, started_at, finished_at, expires_at
+        FROM inventory_export_tasks
+        WHERE tenant_id = #{tenantId} AND created_by = #{userId}
+        <if test="query.status != null">AND status = #{query.status}</if>
+        ORDER BY created_at DESC, id DESC
+    </select>
+
+
+
+    <!-- 将检测需要的数据库字段映射到任务实体。 -->
+    <resultMap id="alertFailedTask" type="com.equipops.domain.entity.InventoryExportTaskEntity">
+        <!-- 任务ID用于去重，并处理相同完成时间的排序。 -->
+        <id property="id" column="id"/>
+        <!-- 保留任务所属企业，供后续事务内复核。 -->
+        <result property="tenantId" column="tenant_id"/>
+        <!-- 保留系统故障类型，供后续分类归并。 -->
+        <result property="errorCode" column="error_code"/>
+        <!-- 保留完成时间，供窗口核对和下一批查询使用。 -->
+        <result property="finishedAt" column="finished_at"/>
+    </resultMap>
+
+    <!-- 查询超时设置为10秒，每次最多返回100条。 -->
+    <select id="selectFailedTaskBatch" resultMap="alertFailedTask" timeout="10">
+        <!-- 读取检测需要的四个字段。 -->
+        SELECT id, tenant_id, error_code, finished_at
+        <!-- 数据来自现有导出任务表。 -->
+        FROM inventory_export_tasks
+        <!-- 限定当前规则所属企业。 -->
+        WHERE tenant_id = #{tenantId}
+        <!-- 只查询失败终态。 -->
+        AND status = 'FAILED'
+        <!-- 包含窗口开始时间。 -->
+        AND finished_at &gt;= #{windowStart}
+        <!-- 排除窗口结束时间。 -->
+        AND finished_at &lt; #{windowEnd}
+        <!-- 只查询本步约定的系统故障类型。 -->
+        AND error_code IN ('TIMEOUT', 'WORKER_LOST', 'IO_FAILED', 'QUERY_FAILED', 'DISK_LIMIT')
+        <!-- 第一批没有上次位置，从第二批开始追加位置条件。 -->
+        <if test="lastFinishedAt != null">
+            <!-- 从上一批最后一条记录之后继续读取。 -->
+            AND (
+            <!-- 完成时间更晚的任务可以继续读取。 -->
+            finished_at &gt; #{lastFinishedAt}
+            <!-- 完成时间相同时，只读取ID更大的任务。 -->
+            OR (finished_at = #{lastFinishedAt} AND id &gt; #{lastTaskId})
+            )
+        </if>
+        <!-- 完成时间优先，同一时间再按ID排列。 -->
+        ORDER BY finished_at ASC, id ASC
+        <!-- 限制本批最多读取100条。 -->
+        LIMIT 100
+    </select>
+</mapper>

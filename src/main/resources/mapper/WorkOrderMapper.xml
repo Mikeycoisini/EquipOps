@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.workorder.mapper.WorkOrderMapper">
+    <resultMap id="workOrderMap" type="com.equipops.domain.entity.WorkOrderEntity">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="siteId" column="site_id"/>
+        <result property="orderNo" column="order_no"/>
+        <result property="title" column="title"/>
+        <result property="equipmentId" column="equipment_id"/>
+        <result property="description" column="description"/>
+        <result property="priority" column="priority"/>
+        <result property="status" column="status"/>
+        <result property="assigneeUserId" column="assignee_user_id"/>
+        <result property="dueAt" column="due_at"/>
+        <result property="completedAt" column="completed_at"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+    <resultMap id="workOrderEquipmentMap" type="com.equipops.domain.vo.EquipmentVO">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="siteId" column="site_id"/>
+        <result property="assetCode" column="asset_code"/>
+        <result property="name" column="name"/>
+        <result property="model" column="model"/>
+        <result property="location" column="location"/>
+        <result property="category" column="category"/>
+        <result property="status" column="status"/>
+        <result property="health" column="health"/>
+        <result property="nextMaintenanceAt" column="next_maintenance_at"/>
+        <result property="runtimeHours" column="runtime_hours"/>
+        <result property="imageRef" column="image_ref"/>
+        <result property="installedAt" column="installed_at"/>
+        <result property="managerUserId" column="manager_user_id"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+    <resultMap id="workOrderPartMap" type="com.equipops.domain.vo.WorkOrderPartVO">
+        <id property="id" column="id"/>
+        <result property="workOrderId" column="work_order_id"/>
+        <result property="sparePartId" column="spare_part_id"/>
+        <result property="partCode" column="part_code"/>
+        <result property="partName" column="part_name"/>
+        <result property="spec" column="spec"/>
+        <result property="unit" column="unit"/>
+        <result property="plannedQuantity" column="planned_quantity"/>
+        <result property="issuedQuantity" column="issued_quantity"/>
+        <result property="returnedQuantity" column="returned_quantity"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+    <resultMap id="workspaceSummaryMap" type="com.equipops.domain.vo.WorkspaceSummaryVO">
+        <result property="totalOrderCount" column="total_order_count"/>
+        <result property="pendingDispatchCount" column="pending_dispatch_count"/>
+        <result property="pendingStartCount" column="pending_start_count"/>
+        <result property="inProgressCount" column="in_progress_count"/>
+        <result property="awaitingAcceptanceCount" column="awaiting_acceptance_count"/>
+        <result property="completedCount" column="completed_count"/>
+    </resultMap>
+
+    <insert id="insertWorkLog" useGeneratedKeys="true" keyProperty="log.id" keyColumn="id">
+        INSERT INTO work_order_logs (
+        work_order_id,
+        event_type,
+        from_status,
+        to_status,
+        title,
+        detail,
+        actor_user_id
+        )
+        VALUES (
+        #{log.workOrderId},
+        #{log.eventType},
+        #{log.fromStatus},
+        #{log.toStatus},
+        #{log.title},
+        #{log.detail},
+        #{log.actorUserId}
+        )
+    </insert>
+
+    <!-- 企业条件始终存在，可选筛选项不传时不加入条件；分页由 MyBatis-Plus 插件处理。 -->
+    <sql id="workOrderPageQuery">
+        SELECT id, tenant_id, site_id, order_no, title, equipment_id, description,
+               priority, status, assignee_user_id, due_at, completed_at,
+               created_by, created_at, updated_at
+        FROM work_orders
+        WHERE tenant_id = #{tenantId}
+        <if test="query.status != null">
+            AND status = #{query.status}
+        </if>
+        <if test="query.priority != null">
+            AND priority = #{query.priority}
+        </if>
+        <if test="query.equipmentId != null">
+            AND equipment_id = #{query.equipmentId}
+        </if>
+        <if test="query.assigneeUserId != null">
+            AND assignee_user_id = #{query.assigneeUserId}
+        </if>
+        <!-- 编号或标题匹配放在同一括号内，避免 OR 绕过企业条件。 -->
+        <if test="keyword != null and keyword != ''">
+            AND (order_no LIKE CONCAT('%', #{keyword}, '%')
+                 OR title LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+    </sql>
+    <select id="selectWorkOrderPage" resultMap="workOrderMap">
+        <include refid="workOrderPageQuery"/>
+        ORDER BY created_at DESC, id DESC
+    </select>
+    <!-- 无截止日期不算逾期；原状态等条件与逾期条件同时生效，不限制创建时间。 -->
+    <select id="selectOverdueWorkOrderPage" resultMap="workOrderMap">
+        <include refid="workOrderPageQuery"/>
+        AND status IN ('PENDING', 'IN_PROGRESS', 'AWAITING_ACCEPTANCE')
+        AND due_at &lt; #{asOf}
+        ORDER BY due_at ASC, id ASC
+    </select>
+    <select id="selectTenantAnduserId" resultType="com.equipops.domain.entity.WorkOrderEntity">
+        SELECT id,
+        tenant_id AS tenantId,
+        site_id AS siteId,
+        order_no AS orderNo,
+        title,
+        equipment_id AS equipmentId,
+        description,
+        priority,
+        status,
+        assignee_user_id AS assigneeUserId,
+        due_at AS dueAt,
+        completed_at AS completedAt,
+        created_by AS createdBy,
+        created_at AS createdAt,
+        updated_at AS updatedAt
+        FROM work_orders
+        WHERE tenant_id = #{tenantId}
+        AND id = #{id}
+        FOR UPDATE
+    </select>
+
+    <!-- 同时检查原状态和未派单条件，防止并发请求覆盖负责人；不修改工单状态。 -->
+    <update id="assignWorkOrder">
+        UPDATE work_orders
+        SET assignee_user_id = #{assigneeUserId}
+        WHERE tenant_id = #{tenantId}
+          AND id = #{id}
+          AND status = 'PENDING'
+          AND assignee_user_id IS NULL
+    </update>
+
+    <!-- 企业、原状态、负责人三个条件同时满足才更新，防止并发和越权修改。 -->
+    <update id="startRepair">
+        UPDATE work_orders
+        SET status = 'IN_PROGRESS'
+        WHERE tenant_id = #{tenantId}
+        AND id = #{id}
+        AND status = 'PENDING'
+        AND assignee_user_id = #{assigneeUserId}
+    </update>
+    <update id="submitAcceptance">
+        UPDATE work_orders
+        SET status = 'AWAITING_ACCEPTANCE'
+        WHERE tenant_id = #{tenantId}
+        AND id = #{id}
+        AND status = 'IN_PROGRESS'
+        AND assignee_user_id = #{assigneeUserId}
+    </update>
+    <!-- 服务层先检查验收资格；更新再限定企业、原状态以及不能自验收，防止并发覆盖。 -->
+    <update id="approveWorkOrder">
+        UPDATE work_orders
+        SET status = 'COMPLETED',
+            completed_at = CURRENT_TIMESTAMP(3)
+        WHERE tenant_id = #{tenantId}
+          AND id = #{id}
+          AND status = 'AWAITING_ACCEPTANCE'
+          AND assignee_user_id != #{actorUserId}
+    </update>
+    <!-- 父工单和设备均限定同一企业、同一厂区，避免详情拼接其他企业的设备。 -->
+    <select id="selectWorkOrderEquipment" resultMap="workOrderEquipmentMap">
+        SELECT e.id, e.tenant_id, e.site_id, e.asset_code, e.name, e.model,
+               e.location, e.category, e.status, e.health, e.next_maintenance_at,
+               e.runtime_hours, e.image_ref, e.installed_at, e.manager_user_id,
+               e.created_at, e.updated_at
+        FROM work_orders w
+        INNER JOIN equipment e ON e.id = w.equipment_id
+            AND e.tenant_id = w.tenant_id AND e.site_id = w.site_id
+        WHERE w.tenant_id = #{tenantId}
+          AND w.id = #{workOrderId}
+    </select>
+
+    <!-- 历史用料不按备件启停过滤；工单和备件必须都属于当前企业。 -->
+    <select id="selectWorkOrderParts" resultMap="workOrderPartMap">
+        SELECT wp.id, wp.work_order_id, wp.spare_part_id,
+               p.part_code, p.name AS part_name, p.spec, p.unit,
+               wp.planned_quantity, wp.issued_quantity, wp.returned_quantity,
+               wp.created_at, wp.updated_at
+        FROM work_order_parts wp
+        INNER JOIN work_orders w ON w.id = wp.work_order_id
+        INNER JOIN spare_parts p ON p.id = wp.spare_part_id AND p.tenant_id = w.tenant_id
+        WHERE w.tenant_id = #{tenantId}
+          AND wp.work_order_id = #{workOrderId}
+        ORDER BY wp.id ASC
+    </select>
+
+    <!-- PENDING 按负责人是否为空拆分；没有工单时 COUNT 为 0，SUM 用 COALESCE 转为 0。 -->
+    <select id="selectWorkspaceSummary" resultMap="workspaceSummaryMap">
+        SELECT COUNT(*) AS total_order_count,
+               COALESCE(SUM(CASE WHEN status = 'PENDING' AND assignee_user_id IS NULL
+                   THEN 1 ELSE 0 END), 0) AS pending_dispatch_count,
+               COALESCE(SUM(CASE WHEN status = 'PENDING' AND assignee_user_id IS NOT NULL
+                   THEN 1 ELSE 0 END), 0) AS pending_start_count,
+               COALESCE(SUM(CASE WHEN status = 'IN_PROGRESS'
+                   THEN 1 ELSE 0 END), 0) AS in_progress_count,
+               COALESCE(SUM(CASE WHEN status = 'AWAITING_ACCEPTANCE'
+                   THEN 1 ELSE 0 END), 0) AS awaiting_acceptance_count,
+               COALESCE(SUM(CASE WHEN status = 'COMPLETED'
+                   THEN 1 ELSE 0 END), 0) AS completed_count
+        FROM work_orders
+        WHERE tenant_id = #{tenantId}
+    </select>
+    <!-- 与验收通过使用相同的企业和原状态限制；退回只改变状态，保留原维修负责人。 -->
+    <update id="rejectWorkOrder">
+        UPDATE work_orders
+        SET status = 'IN_PROGRESS'
+        WHERE tenant_id = #{tenantId}
+          AND id = #{id}
+          AND status = 'AWAITING_ACCEPTANCE'
+          AND assignee_user_id != #{actorUserId}
+    </update>
+</mapper>

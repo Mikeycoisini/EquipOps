@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.operations.mapper.AlertDetectionMapper">
+ <resultMap id="task" type="com.equipops.domain.entity.InventoryExportTaskEntity">
+  <id property="id" column="id"/><result property="tenantId" column="tenant_id"/>
+  <result property="errorCode" column="error_code"/><result property="finishedAt" column="finished_at"/>
+ </resultMap>
+ <resultMap id="source" type="com.equipops.domain.entity.AlertEventSourceEntity">
+  <id property="id" column="id"/><result property="tenantId" column="tenant_id"/>
+  <result property="ruleId" column="rule_id"/><result property="eventId" column="event_id"/>
+  <result property="taskId" column="task_id"/><result property="errorCode" column="error_code"/>
+  <result property="taskFinishedAt" column="task_finished_at"/><result property="createdAt" column="created_at"/>
+ </resultMap>
+ <resultMap id="event" type="com.equipops.domain.entity.AlertEventEntity">
+  <result property="id" column="id"/>
+  <result property="tenantId" column="tenant_id"/>
+  <result property="ruleId" column="rule_id"/>
+  <result property="fingerprint" column="fingerprint"/>
+  <result property="errorCode" column="error_code"/>
+  <result property="status" column="status" javaType="com.equipops.domain.enums.AlertEventStatus" typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+  <result property="recoveryStatus" column="recovery_status" javaType="com.equipops.domain.enums.AlertRecoveryStatus" typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+  <result property="openSlot" column="open_slot"/>
+  <result property="occurrenceCount" column="occurrence_count"/>
+  <result property="firstTaskId" column="first_task_id"/>
+  <result property="latestTaskId" column="latest_task_id"/>
+  <result property="ownerUserId" column="owner_user_id"/>
+  <result property="firstSeenAt" column="first_seen_at"/>
+  <result property="lastSeenAt" column="last_seen_at"/>
+  <result property="acknowledgedAt" column="acknowledged_at"/>
+  <result property="recoveredAt" column="recovered_at"/>
+  <result property="resolvedAt" column="resolved_at"/>
+  <result property="version" column="version"/>
+  <result property="createdAt" column="created_at"/>
+  <result property="updatedAt" column="updated_at"/>
+ </resultMap>
+ <!-- 所有任务复核使用当前读，并重复限定企业、终态、时间窗口和错误白名单。 -->
+ <select id="selectFailedTaskForUpdate" resultMap="task" timeout="10">
+  SELECT id,tenant_id,error_code,finished_at FROM inventory_export_tasks
+  WHERE tenant_id=#{tenantId} AND id=#{taskId} AND status='FAILED'
+   AND finished_at &gt;= #{start} AND finished_at &lt; #{end}
+   AND error_code IN ('TIMEOUT','WORKER_LOST','IO_FAILED','QUERY_FAILED','DISK_LIMIT') FOR UPDATE
+ </select>
+ <!-- 规则锁统一串行化本规则写入，唯一键继续兜底跨实例去重。 -->
+ <select id="selectSourceForUpdate" resultMap="source" timeout="10">
+  SELECT * FROM alert_event_sources WHERE tenant_id=#{tenantId} AND rule_id=#{ruleId} AND task_id=#{taskId} FOR UPDATE
+ </select>
+ <insert id="insertSource" timeout="10">
+  INSERT INTO alert_event_sources(tenant_id,rule_id,event_id,task_id,error_code,task_finished_at)
+  VALUES(#{tenantId},#{ruleId},NULL,#{task.id},#{task.errorCode},#{task.finishedAt})
+ </insert>
+ <!-- 不读取已归属旧事件的证据，避免结案后重复触发。 -->
+ <select id="selectPendingSources" resultMap="source" timeout="10">
+  SELECT * FROM alert_event_sources WHERE tenant_id=#{tenantId} AND rule_id=#{ruleId} AND error_code=#{code}
+   AND event_id IS NULL AND task_finished_at &gt;= #{start} AND task_finished_at &lt; #{end}
+  ORDER BY task_finished_at,id FOR UPDATE
+ </select>
+ <select id="selectActiveEvent" resultMap="event" timeout="10">
+  SELECT * FROM alert_events WHERE tenant_id=#{tenantId} AND rule_id=#{ruleId} AND error_code=#{code}
+   AND open_slot=1 AND status IN ('OPEN','ACKNOWLEDGED') FOR UPDATE
+ </select>
+ <insert id="insertEvent" useGeneratedKeys="true" keyProperty="event.id" timeout="10">
+  INSERT INTO alert_events(tenant_id,rule_id,fingerprint,error_code,status,recovery_status,open_slot,
+   occurrence_count,first_task_id,latest_task_id,owner_user_id,first_seen_at,last_seen_at,version)
+  VALUES(#{event.tenantId},#{event.ruleId},#{event.fingerprint},#{event.errorCode},'OPEN','UNVERIFIED',1,
+   0,#{event.firstTaskId},#{event.latestTaskId},#{event.ownerUserId},#{event.firstSeenAt},#{event.lastSeenAt},0)
+ </insert>
+ <update id="attachSource" timeout="10">
+  UPDATE alert_event_sources SET event_id=#{eventId}
+  WHERE tenant_id=#{tenantId} AND rule_id=#{ruleId} AND id=#{sourceId} AND event_id IS NULL
+ </update>
+ <update id="updateEvent" timeout="10">
+  UPDATE alert_events SET occurrence_count=#{event.occurrenceCount},latest_task_id=#{event.latestTaskId},
+   owner_user_id=#{event.ownerUserId},last_seen_at=#{event.lastSeenAt},
+   recovery_status=#{event.recoveryStatus,javaType=com.equipops.domain.enums.AlertRecoveryStatus,typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+   recovered_at=#{event.recoveredAt},version=version+1
+  WHERE tenant_id=#{event.tenantId} AND rule_id=#{event.ruleId} AND id=#{event.id}
+   AND version=#{expectedVersion} AND open_slot=1 AND status IN ('OPEN','ACKNOWLEDGED')
+ </update>
+ <select id="selectLastNotification" resultType="com.equipops.domain.entity.AlertNotificationEntity" timeout="10">
+  SELECT * FROM alert_notifications WHERE tenant_id=#{tenantId} AND event_id=#{eventId}
+   AND recipient_user_id=#{recipientId} AND status='DELIVERED' ORDER BY delivered_at DESC,id DESC LIMIT 1 FOR UPDATE
+ </select>
+ <!-- 锁定当前仍有效的企业、账号、成员及角色关联，防止用旧快照给已撤权负责人生成通知。 -->
+ <select id="selectRecipientForShare" resultType="java.lang.Long" timeout="10">
+  SELECT m.id FROM tenants t JOIN tenant_memberships m ON m.tenant_id=t.id JOIN users u ON u.id=m.user_id
+   JOIN tenant_member_roles mr ON mr.tenant_id=m.tenant_id AND mr.membership_id=m.id
+   JOIN roles r ON r.id=mr.role_id
+  WHERE t.id=#{tenantId} AND u.id=#{recipientId} AND t.enabled=1 AND m.enabled=1 AND u.enabled=1
+   AND r.role_code='TENANT_ADMIN' LIMIT 1 FOR SHARE
+ </select>
+ <select id="selectNotificationId" resultType="java.lang.Long" timeout="10">
+  SELECT id FROM alert_notifications WHERE tenant_id=#{tenantId} AND delivery_key=#{deliveryKey} FOR UPDATE
+ </select>
+ <insert id="insertNotification" useGeneratedKeys="true" keyProperty="notification.id" timeout="10">
+  INSERT INTO alert_notifications(tenant_id,event_id,recipient_user_id,delivery_key,status,title,message,attempts,delivered_at)
+  VALUES(#{notification.tenantId},#{notification.eventId},#{notification.recipientUserId},#{notification.deliveryKey},
+   'DELIVERED',#{notification.title},#{notification.message},1,#{notification.deliveredAt})
+ </insert>
+</mapper>

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tenant.mapper.TenantMembershipMapper">
+    <resultMap id="memberPageMap" type="com.equipops.domain.vo.TenantMemberVO">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="account" column="account"/>
+        <result property="displayName" column="display_name"/>
+        <result property="enabled" column="enabled"/>
+        <result property="joinedAt" column="joined_at"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <!-- 分页只关联用户，不关联一对多的角色表，保证成员总数准确。 -->
+    <select id="selectMemberPage" resultMap="memberPageMap">
+        SELECT m.id, m.tenant_id, m.user_id, u.account, u.display_name,
+               m.enabled, m.joined_at, m.created_at, m.updated_at
+        FROM tenant_memberships m
+        INNER JOIN users u ON u.id = m.user_id
+        WHERE m.tenant_id = #{tenantId}
+        <if test="keyword != null and keyword != ''">
+            AND (u.account LIKE CONCAT('%', #{keyword}, '%')
+                 OR u.display_name LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="enabled != null">
+            AND m.enabled = #{enabled}
+        </if>
+        ORDER BY m.created_at DESC, m.id DESC
+    </select>
+
+    <!-- 同一成员的多条角色记录合并到 roles；id 始终是成员关系 ID。 -->
+    <resultMap id="memberRolesMap" type="com.equipops.domain.vo.TenantMemberVO">
+        <id property="id" column="membership_id"/>
+        <collection property="roles" ofType="com.equipops.domain.vo.RoleVO">
+            <id property="id" column="role_id"/>
+            <result property="roleCode" column="role_code"/>
+            <result property="name" column="name"/>
+            <result property="description" column="description"/>
+            <result property="createdAt" column="created_at"/>
+            <result property="updatedAt" column="updated_at"/>
+        </collection>
+    </resultMap>
+
+    <select id="selectMemberRoles" resultMap="memberRolesMap">
+        SELECT mr.membership_id, r.id AS role_id, r.role_code, r.name,
+               r.description, r.created_at, r.updated_at
+        FROM tenant_member_roles mr
+        INNER JOIN roles r ON r.id = mr.role_id
+        WHERE mr.tenant_id = #{tenantId}
+        <choose>
+            <when test="membershipIds != null and membershipIds.size() > 0">
+                AND mr.membership_id IN
+                <foreach collection="membershipIds" item="membershipId" open="(" separator="," close=")">
+                    #{membershipId}
+                </foreach>
+            </when>
+            <!-- 空列表不能变成查询整个企业的角色。 -->
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
+        ORDER BY mr.membership_id, r.role_code, r.id
+    </select>
+    <!-- 不能使用普通 COUNT 快照：在企业锁之后读取最新状态，并锁住相关记录。 -->
+    <select id="selectEnabledAdminUser" resultType="java.lang.Long">
+        SELECT m.user_id
+        FROM tenant_memberships m
+        INNER JOIN users u ON u.id = m.user_id
+        INNER JOIN tenant_member_roles mr ON mr.tenant_id = m.tenant_id AND mr.membership_id = m.id
+        INNER JOIN roles r ON r.id = mr.role_id
+        WHERE m.tenant_id = #{tenantId}
+        AND m.enabled = 1 AND u.enabled = 1
+        AND r.role_code = #{roleCode}
+        ORDER BY m.id
+        FOR UPDATE
+    </select>
+
+</mapper>

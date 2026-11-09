@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.inventory.mapper.WarehouseStockMapper">
+    <resultMap id="warehouseStockMap" type="com.equipops.domain.vo.WarehouseStockVO">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="warehouseId" column="warehouse_id"/>
+        <result property="siteId" column="site_id"/>
+        <result property="warehouseCode" column="warehouse_code"/>
+        <result property="warehouseName" column="warehouse_name"/>
+        <result property="warehouseEnabled" column="warehouse_enabled"/>
+        <result property="sparePartId" column="spare_part_id"/>
+        <result property="partCode" column="part_code"/>
+        <result property="partName" column="part_name"/>
+        <result property="spec" column="spec"/>
+        <result property="unit" column="unit"/>
+        <result property="sparePartEnabled" column="spare_part_enabled"/>
+        <result property="quantity" column="quantity"/>
+        <result property="minStockQuantity" column="min_stock_quantity"/>
+        <result property="lowStock" column="low_stock"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+    <update id="updateMinStockQuantity">
+        UPDATE warehouse_stock
+        SET min_stock_quantity = #{minStockQuantity}
+        WHERE tenant_id = #{tenantId}
+        AND id = #{id}
+    </update>
+    <!-- 与库存列表保持相同的企业、关联及低库存判断条件。 -->
+    <select id="countLowStock" resultType="long">
+        SELECT COUNT(*)
+        FROM warehouse_stock s
+        INNER JOIN warehouses w
+        ON w.id = s.warehouse_id
+        AND w.tenant_id = s.tenant_id
+        INNER JOIN spare_parts p
+        ON p.id = s.spare_part_id
+        AND p.tenant_id = s.tenant_id
+        WHERE s.tenant_id = #{tenantId}
+        AND s.quantity &lt; s.min_stock_quantity
+    </select>
+
+    <!-- 仅用于校验筛选对象可见性；未知和其他企业 ID 对调用方含义相同。 -->
+    <select id="countTenantWarehouse" resultType="long">
+        SELECT COUNT(*) FROM warehouses WHERE tenant_id = #{tenantId} AND id = #{warehouseId}
+    </select>
+    <select id="countTenantSparePart" resultType="long">
+        SELECT COUNT(*) FROM spare_parts WHERE tenant_id = #{tenantId} AND id = #{sparePartId}
+    </select>
+
+    <!-- 只读取已建账余额；无记录不是零库存，不回退读取 spare_parts 的旧数量和阈值。 -->
+    <select id="selectStockPage" resultMap="warehouseStockMap">
+        SELECT s.id, s.tenant_id, s.warehouse_id, w.site_id,
+               w.warehouse_code, w.name AS warehouse_name, w.enabled AS warehouse_enabled,
+               s.spare_part_id, p.part_code, p.name AS part_name, p.spec, p.unit,
+               p.enabled AS spare_part_enabled,
+               s.quantity, s.min_stock_quantity,
+               CASE WHEN s.quantity &lt; s.min_stock_quantity THEN 1 ELSE 0 END AS low_stock,
+               s.created_at, s.updated_at
+        FROM warehouse_stock s
+        INNER JOIN warehouses w ON w.id = s.warehouse_id AND w.tenant_id = s.tenant_id
+        INNER JOIN spare_parts p ON p.id = s.spare_part_id AND p.tenant_id = s.tenant_id
+        WHERE s.tenant_id = #{tenantId}
+        <if test="query.warehouseId != null">
+            AND s.warehouse_id = #{query.warehouseId}
+        </if>
+        <if test="query.sparePartId != null">
+            AND s.spare_part_id = #{query.sparePartId}
+        </if>
+        <!-- 编号/名称共用括号，避免 OR 把其他企业的资料带入结果。 -->
+        <if test="keyword != null and keyword != ''">
+            AND (p.part_code LIKE CONCAT('%', #{keyword}, '%')
+                 OR p.name LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="query.lowStockOnly != null and query.lowStockOnly">
+            AND s.quantity &lt; s.min_stock_quantity
+        </if>
+        ORDER BY s.warehouse_id ASC, s.spare_part_id ASC, s.id ASC
+    </select>
+    <!-- 入库校验保留仓库及厂区状态，由 Service 分别判断不可用原因。 -->
+    <resultMap id="stockInWarehouseCheckMap"
+               type="com.equipops.domain.vo.StockInWarehouseCheckVO">
+        <id property="warehouseId" column="warehouse_id"/>
+        <result property="warehouseEnabled" column="warehouse_enabled"/>
+        <result property="siteId" column="site_id"/>
+        <result property="siteEnabled" column="site_enabled"/>
+    </resultMap>
+
+    <select id="selectWarehouseForStockIn" resultMap="stockInWarehouseCheckMap">
+        SELECT w.id AS warehouse_id, w.enabled AS warehouse_enabled,
+               s.id AS site_id, s.enabled AS site_enabled
+        FROM warehouses w
+        LEFT JOIN sites s ON s.id = w.site_id AND s.tenant_id = w.tenant_id
+        WHERE w.tenant_id = #{tenantId}
+          AND w.id = #{warehouseId}
+    </select>
+
+    <!-- 只查询当前企业备件，Boolean 区分不存在与停用，不能把停用条件放进 WHERE。 -->
+    <select id="selectSparePartEnabled" resultType="java.lang.Boolean">
+        SELECT enabled FROM spare_parts
+        WHERE tenant_id = #{tenantId}
+          AND id = #{sparePartId}
+    </select>
+    <!-- 更新后按同企业主键回查；停用资源仍保留已有余额资料。 -->
+    <select id="selectStockDetail" resultMap="warehouseStockMap">
+        SELECT s.id, s.tenant_id, s.warehouse_id, w.site_id,
+               w.warehouse_code, w.name AS warehouse_name, w.enabled AS warehouse_enabled,
+               s.spare_part_id, p.part_code, p.name AS part_name, p.spec, p.unit,
+               p.enabled AS spare_part_enabled,
+               s.quantity, s.min_stock_quantity,
+               CASE WHEN s.quantity &lt; s.min_stock_quantity THEN 1 ELSE 0 END AS low_stock,
+               s.created_at, s.updated_at
+        FROM warehouse_stock s
+        INNER JOIN warehouses w ON w.id = s.warehouse_id AND w.tenant_id = s.tenant_id
+        INNER JOIN spare_parts p ON p.id = s.spare_part_id AND p.tenant_id = s.tenant_id
+        WHERE s.tenant_id = #{tenantId} AND s.id = #{id}
+    </select>
+</mapper>

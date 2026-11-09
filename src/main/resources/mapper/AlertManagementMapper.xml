@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.operations.mapper.AlertManagementMapper">
+ <select id="selectRule" resultType="com.equipops.domain.entity.AlertRuleEntity" timeout="10">
+  SELECT * FROM alert_rules WHERE tenant_id=#{tenantId} AND rule_code='EXPORT_TASK_SYSTEM_FAILURE'
+ </select>
+ <select id="lockRule" resultType="com.equipops.domain.entity.AlertRuleEntity" timeout="10">
+  SELECT * FROM alert_rules WHERE tenant_id=#{tenantId} AND rule_code='EXPORT_TASK_SYSTEM_FAILURE' FOR UPDATE
+ </select>
+ <insert id="insertRule" useGeneratedKeys="true" keyProperty="rule.id" timeout="10">
+  INSERT INTO alert_rules(tenant_id,rule_code,enabled,threshold_count,window_seconds,cooldown_seconds,owner_user_id)
+  VALUES(#{rule.tenantId},'EXPORT_TASK_SYSTEM_FAILURE',#{rule.enabled},#{rule.thresholdCount},#{rule.windowSeconds},#{rule.cooldownSeconds},#{rule.ownerUserId})
+ </insert>
+ <update id="updateRule" timeout="10">
+  UPDATE alert_rules SET enabled=#{rule.enabled},threshold_count=#{rule.thresholdCount},window_seconds=#{rule.windowSeconds},
+   cooldown_seconds=#{rule.cooldownSeconds},owner_user_id=#{rule.ownerUserId},version=version+1
+  WHERE tenant_id=#{rule.tenantId} AND id=#{rule.id} AND version=#{expectedVersion}
+ </update>
+ <select id="lockEvent" resultMap="com.operations.mapper.AlertDetectionMapper.event" timeout="10">
+  SELECT * FROM alert_events WHERE tenant_id=#{tenantId} AND id=#{id} FOR UPDATE
+ </select>
+ <update id="updateState" timeout="10">
+  UPDATE alert_events SET version=version+1
+  <if test="action == 'ACKNOWLEDGE'">,status='ACKNOWLEDGED',acknowledged_at=CURRENT_TIMESTAMP(6)</if>
+  <if test="action == 'RESOLVE'">,status='RESOLVED',open_slot=NULL,resolved_at=CURRENT_TIMESTAMP(6)</if>
+  WHERE tenant_id=#{tenantId} AND id=#{id} AND version=#{version} AND open_slot=1
+ </update>
+ <insert id="insertAction" timeout="10">
+  INSERT INTO alert_actions(tenant_id,event_id,actor_user_id,action_type,note)
+  VALUES(#{action.tenantId},#{action.eventId},#{action.actorUserId},#{action.actionType,javaType=com.equipops.domain.enums.AlertActionType,typeHandler=org.apache.ibatis.type.EnumTypeHandler},#{action.note})
+ </insert>
+ <select id="selectActions" resultType="com.equipops.domain.vo.AlertActionVO" timeout="10">
+  SELECT id,actor_user_id,action_type,note,created_at FROM alert_actions
+  WHERE tenant_id=#{tenantId} AND event_id=#{eventId} ORDER BY id DESC LIMIT 200
+ </select>
+ <select id="selectNotifications" resultType="com.equipops.domain.vo.AlertNotificationVO" timeout="10">
+  SELECT id,event_id,title,message,read_at,created_at FROM alert_notifications
+  WHERE tenant_id=#{tenantId} AND recipient_user_id=#{userId} AND status='DELIVERED' ORDER BY created_at DESC,id DESC
+ </select>
+ <select id="selectOwnNotification" resultType="java.lang.Long" timeout="10">
+  SELECT id FROM alert_notifications WHERE tenant_id=#{tenantId} AND recipient_user_id=#{userId} AND id=#{id} AND status='DELIVERED'
+ </select>
+ <update id="markRead" timeout="10">
+  UPDATE alert_notifications SET read_at=COALESCE(read_at,CURRENT_TIMESTAMP(6))
+  WHERE tenant_id=#{tenantId} AND recipient_user_id=#{userId} AND id=#{id} AND status='DELIVERED'
+ </update>
+ <select id="recoveryCandidates" resultMap="com.operations.mapper.AlertDetectionMapper.event" timeout="10">
+  SELECT e.* FROM alert_events e JOIN alert_rules r ON r.tenant_id=e.tenant_id AND r.id=e.rule_id
+  WHERE r.enabled=1 AND e.open_slot=1 AND e.recovery_status='UNVERIFIED'
+   AND e.last_seen_at &lt;= TIMESTAMPADD(SECOND,-r.window_seconds,CURRENT_TIMESTAMP(6))
+   AND NOT EXISTS(SELECT 1 FROM inventory_export_tasks f WHERE f.tenant_id=e.tenant_id AND f.status='FAILED'
+    AND f.error_code=e.error_code AND f.finished_at &gt;= TIMESTAMPADD(SECOND,-r.window_seconds,CURRENT_TIMESTAMP(6)))
+   AND EXISTS(SELECT 1 FROM inventory_export_tasks s WHERE s.tenant_id=e.tenant_id AND s.status='SUCCEEDED' AND s.finished_at &gt; e.last_seen_at)
+  AND EXISTS(SELECT 1 FROM tenants t JOIN tenant_memberships m ON m.tenant_id=t.id
+   JOIN users u ON u.id=m.user_id JOIN tenant_member_roles mr ON mr.tenant_id=m.tenant_id AND mr.membership_id=m.id
+   JOIN roles ar ON ar.id=mr.role_id WHERE t.id=r.tenant_id AND u.id=r.owner_user_id
+    AND t.enabled=1 AND m.enabled=1 AND u.enabled=1 AND ar.role_code='TENANT_ADMIN')
+  ORDER BY e.last_seen_at,e.id LIMIT 100
+ </select>
+ <select id="recentFailure" resultType="java.lang.Long" timeout="10">
+  SELECT id FROM inventory_export_tasks WHERE tenant_id=#{tenantId} AND status='FAILED' AND error_code=#{code}
+   AND finished_at &gt;= #{start} ORDER BY finished_at,id LIMIT 1 FOR SHARE
+ </select>
+ <select id="laterSuccess" resultType="java.lang.Long" timeout="10">
+  SELECT id FROM inventory_export_tasks WHERE tenant_id=#{tenantId} AND status='SUCCEEDED' AND finished_at &gt; #{after}
+   ORDER BY finished_at,id LIMIT 1 FOR SHARE
+ </select>
+ <update id="markRecovered" timeout="10">
+  UPDATE alert_events SET recovery_status='RECOVERED',recovered_at=CURRENT_TIMESTAMP(6),version=version+1
+  WHERE tenant_id=#{tenantId} AND id=#{id} AND version=#{version} AND open_slot=1 AND recovery_status='UNVERIFIED'
+ </update>
+</mapper>

@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.maintenance.mapper.MaintenancePlanMapper">
+    <!-- 所有资源查询显式带企业条件，不能仅凭请求中的设备ID访问其他企业。 -->
+    <select id="selectTenantEquipment" resultType="com.equipops.domain.entity.EquipmentEntity">
+        SELECT id, tenant_id AS tenantId, site_id AS siteId
+        FROM equipment
+        WHERE tenant_id = #{tenantId} AND id = #{equipmentId}
+    </select>
+
+    <select id="selectTenantSite" resultType="com.equipops.domain.entity.SiteEntity">
+        SELECT id, tenant_id AS tenantId, enabled
+        FROM sites
+        WHERE tenant_id = #{tenantId} AND id = #{siteId}
+    </select>
+
+    <!-- userId是全局用户主键，不是tenant_memberships.id。 -->
+    <select id="countEnabledAssignee" resultType="int">
+        SELECT COUNT(*)
+        FROM tenant_memberships tm
+        INNER JOIN users u ON u.id = tm.user_id
+        WHERE tm.tenant_id = #{tenantId} AND tm.user_id = #{userId}
+          AND tm.enabled = TRUE AND u.enabled = TRUE
+    </select>
+
+    <!-- 主键及时间交给数据库生成；@Param("plan")对应keyProperty中的plan。 -->
+    <insert id="insertPlan" useGeneratedKeys="true" keyProperty="plan.id" keyColumn="id">
+        INSERT INTO maintenance_plans
+            (tenant_id, site_id, equipment_id, name, plan_type, content,
+             cycle_days, next_due_date, assignee_user_id, enabled, created_by)
+        VALUES
+            (#{plan.tenantId}, #{plan.siteId}, #{plan.equipmentId}, #{plan.name},
+             #{plan.planType,javaType=com.equipops.domain.enums.MaintenancePlanType,typeHandler=org.apache.ibatis.type.EnumTypeHandler}, #{plan.content},
+             #{plan.cycleDays}, #{plan.nextDueDate}, #{plan.assigneeUserId}, #{plan.enabled}, #{plan.createdBy})
+    </insert>
+
+    <resultMap id="planView" type="com.equipops.domain.vo.MaintenancePlanVO">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="siteId" column="site_id"/>
+        <result property="equipmentId" column="equipment_id"/>
+        <result property="name" column="name"/>
+        <result property="planType" column="plan_type" javaType="com.equipops.domain.enums.MaintenancePlanType"
+                typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+        <result property="content" column="content"/>
+        <result property="cycleDays" column="cycle_days"/>
+        <result property="nextDueDate" column="next_due_date"/>
+        <result property="assigneeUserId" column="assignee_user_id"/>
+        <result property="enabled" column="enabled"/>
+        <result property="createdBy" column="created_by"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="equipmentAssetCode" column="equipment_asset_code"/>
+        <result property="equipmentName" column="equipment_name"/>
+        <result property="assigneeName" column="assignee_name"/>
+    </resultMap>
+
+    <!-- 名称读取当前资料；不按启用状态过滤回查，避免停用后丢失已登记计划。 -->
+    <sql id="planDetailQuery">
+        SELECT p.id, p.tenant_id, p.site_id, p.equipment_id, p.name, p.plan_type,
+               p.content, p.cycle_days, p.next_due_date, p.assignee_user_id,
+               p.enabled, p.created_by, p.created_at, p.updated_at,
+               e.asset_code AS equipment_asset_code, e.name AS equipment_name,
+               u.display_name AS assignee_name
+        FROM maintenance_plans p
+        LEFT JOIN equipment e ON e.tenant_id = p.tenant_id AND e.id = p.equipment_id
+        LEFT JOIN tenant_memberships tm ON tm.tenant_id = p.tenant_id AND tm.user_id = p.assignee_user_id
+        LEFT JOIN users u ON u.id = tm.user_id
+        WHERE p.tenant_id = #{tenantId} AND p.id = #{id}
+    </sql>
+    <select id="selectPlanDetail" resultMap="planView">
+        <include refid="planDetailQuery"/>
+    </select>
+    <!-- 编辑使用当前读，同一计划的修改和启停不能交错覆盖。 -->
+    <select id="selectPlanDetailForUpdate" resultMap="planView">
+        <include refid="planDetailQuery"/>
+        FOR UPDATE
+    </select>
+    <!-- 各可选条件均与企业条件使用AND；false同样是有效筛选值，不能按真假判断是否追加。 -->
+    <!-- 普通列表和到期待办共用字段、联表及原有筛选条件。 -->
+    <sql id="planPageQuery">
+        SELECT p.id, p.tenant_id, p.site_id, p.equipment_id, p.name, p.plan_type,
+               p.content, p.cycle_days, p.next_due_date, p.assignee_user_id,
+               p.enabled, p.created_by, p.created_at, p.updated_at,
+               e.asset_code AS equipment_asset_code, e.name AS equipment_name,
+               u.display_name AS assignee_name
+        FROM maintenance_plans p
+        LEFT JOIN equipment e ON e.tenant_id = p.tenant_id AND e.id = p.equipment_id
+        LEFT JOIN tenant_memberships tm ON tm.tenant_id = p.tenant_id AND tm.user_id = p.assignee_user_id
+        LEFT JOIN users u ON u.id = tm.user_id
+        WHERE p.tenant_id = #{tenantId}
+        <if test="query.keyword != null and query.keyword != ''">
+            AND p.name LIKE CONCAT('%', #{query.keyword}, '%')
+        </if>
+        <if test="query.equipmentId != null">
+            AND p.equipment_id = #{query.equipmentId}
+        </if>
+        <if test="query.planType != null">
+            AND p.plan_type = #{query.planType,javaType=com.equipops.domain.enums.MaintenancePlanType,typeHandler=org.apache.ibatis.type.EnumTypeHandler}
+        </if>
+        <if test="query.enabled != null">
+            AND p.enabled = #{query.enabled}
+        </if>
+    </sql>
+    <select id="selectPlanPage" resultMap="planView">
+        <include refid="planPageQuery"/>
+        ORDER BY p.created_at DESC, p.id DESC
+    </select>
+    <select id="selectDuePlanPage" resultMap="planView">
+        <include refid="planPageQuery"/>
+        AND p.enabled = TRUE AND p.next_due_date &lt;= #{today}
+        AND NOT EXISTS (
+            SELECT 1 FROM maintenance_executions x
+            WHERE x.tenant_id = p.tenant_id AND x.plan_id = p.id
+              AND x.scheduled_date = p.next_due_date
+        )
+        ORDER BY p.next_due_date ASC, p.id DESC
+    </select>
+    <!-- 事务内锁定单条计划；不联锁设备和成员等无关资源。 -->
+    <select id="selectPlanEnabledForUpdate" resultType="java.lang.Boolean">
+        SELECT enabled FROM maintenance_plans
+        WHERE tenant_id = #{tenantId} AND id = #{id}
+        FOR UPDATE
+    </select>
+
+    <update id="updatePlanEnabled">
+        UPDATE maintenance_plans SET enabled = #{enabled}
+        WHERE tenant_id = #{tenantId} AND id = #{id}
+    </update>
+    <!-- 定向修改，明确排除tenant_id、enabled、created_by、created_at。 -->
+    <update id="updatePlan">
+        UPDATE maintenance_plans
+        SET name = #{request.name}, equipment_id = #{request.equipmentId}, site_id = #{siteId},
+            plan_type = #{request.planType,javaType=com.equipops.domain.enums.MaintenancePlanType,typeHandler=org.apache.ibatis.type.EnumTypeHandler},
+            content = #{request.content}, cycle_days = #{request.cycleDays},
+            next_due_date = #{request.nextDueDate}, assignee_user_id = #{request.assigneeUserId}
+        WHERE tenant_id = #{tenantId} AND id = #{id}
+    </update>
+    <!-- 编辑校验采用当前读，关联资源状态保持到本事务提交。 -->
+    <select id="selectTenantEquipmentForUpdate" resultType="com.equipops.domain.entity.EquipmentEntity">
+        SELECT id, tenant_id AS tenantId, site_id AS siteId
+        FROM equipment WHERE tenant_id = #{tenantId} AND id = #{equipmentId}
+        FOR UPDATE
+    </select>
+    <select id="selectTenantSiteForUpdate" resultType="com.equipops.domain.entity.SiteEntity">
+        SELECT id, tenant_id AS tenantId, enabled
+        FROM sites WHERE tenant_id = #{tenantId} AND id = #{siteId}
+        FOR UPDATE
+    </select>
+    <select id="selectEnabledAssigneeForUpdate" resultType="java.lang.Long">
+        SELECT u.id
+        FROM tenant_memberships tm INNER JOIN users u ON u.id = tm.user_id
+        WHERE tm.tenant_id = #{tenantId} AND tm.user_id = #{userId}
+          AND tm.enabled = TRUE AND u.enabled = TRUE
+        FOR UPDATE
+    </select>
+
+    <resultMap id="executionMap" type="com.equipops.domain.entity.MaintenanceExecutionEntity">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="planId" column="plan_id"/>
+        <result property="siteId" column="site_id"/>
+        <result property="equipmentId" column="equipment_id"/>
+        <result property="requestId" column="request_id"/>
+        <result property="planName" column="plan_name"/>
+        <result property="planType" column="plan_type" javaType="com.equipops.domain.enums.MaintenancePlanType" typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+        <result property="planContent" column="plan_content"/>
+        <result property="cycleDays" column="cycle_days"/>
+        <result property="scheduledDate" column="scheduled_date"/>
+        <result property="executedAt" column="executed_at"/>
+        <result property="executedBy" column="executed_by"/>
+        <result property="result" column="result"/>
+        <result property="nextDueDate" column="next_due_date"/>
+        <result property="equipmentAssetCode" column="equipment_asset_code"/>
+        <result property="equipmentName" column="equipment_name"/>
+        <result property="executedByName" column="executed_by_name"/>
+    </resultMap>
+    <resultMap id="executionView" type="com.equipops.domain.vo.MaintenanceExecutionVO">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="planId" column="plan_id"/>
+        <result property="siteId" column="site_id"/>
+        <result property="equipmentId" column="equipment_id"/>
+        <result property="requestId" column="request_id"/>
+        <result property="planName" column="plan_name"/>
+        <result property="planType" column="plan_type" javaType="com.equipops.domain.enums.MaintenancePlanType" typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+        <result property="planContent" column="plan_content"/>
+        <result property="cycleDays" column="cycle_days"/>
+        <result property="scheduledDate" column="scheduled_date"/>
+        <result property="executedAt" column="executed_at"/>
+        <result property="executedBy" column="executed_by"/>
+        <result property="result" column="result"/>
+        <result property="nextDueDate" column="next_due_date"/>
+        <result property="equipmentAssetCode" column="equipment_asset_code"/>
+        <result property="equipmentName" column="equipment_name"/>
+        <result property="executedByName" column="executed_by_name"/>
+    </resultMap>
+    <sql id="executionColumns">id, tenant_id, plan_id, site_id, equipment_id, request_id, plan_name, plan_type, plan_content, cycle_days, scheduled_date, executed_at, executed_by, result, next_due_date, equipment_asset_code, equipment_name, executed_by_name</sql>
+    <select id="findExecutionByRequest" resultMap="executionMap">
+        SELECT <include refid="executionColumns"/> FROM maintenance_executions
+        WHERE tenant_id = #{tenantId} AND request_id = #{requestId}
+    </select>
+    <select id="countExecutionForPeriod" resultType="int">
+        SELECT COUNT(*) FROM maintenance_executions
+        WHERE tenant_id = #{tenantId} AND plan_id = #{planId} AND scheduled_date = #{scheduledDate}
+    </select>
+    <!-- 运行期参数来自Java；快照直接从已锁定的本企业计划及关联记录读取。 -->
+    <insert id="insertExecution" useGeneratedKeys="true" keyProperty="execution.id" keyColumn="id">
+        INSERT INTO maintenance_executions
+            (tenant_id, plan_id, site_id, equipment_id, request_id, plan_name, plan_type,
+             plan_content, cycle_days, scheduled_date, executed_at, executed_by, result,
+             next_due_date, equipment_asset_code, equipment_name, executed_by_name)
+        SELECT p.tenant_id, p.id, p.site_id, p.equipment_id, #{execution.requestId},
+               p.name, p.plan_type, p.content, p.cycle_days, p.next_due_date,
+               #{execution.executedAt}, #{execution.executedBy}, #{execution.result}, #{execution.nextDueDate},
+               e.asset_code, e.name, u.display_name
+        FROM maintenance_plans p
+        INNER JOIN equipment e ON e.tenant_id = p.tenant_id AND e.id = p.equipment_id
+        INNER JOIN tenant_memberships tm ON tm.tenant_id = p.tenant_id AND tm.user_id = #{execution.executedBy}
+        INNER JOIN users u ON u.id = tm.user_id
+        WHERE p.tenant_id = #{execution.tenantId} AND p.id = #{execution.planId}
+          AND p.enabled = TRUE AND p.assignee_user_id = tm.user_id
+          AND p.next_due_date = #{execution.scheduledDate}
+          AND tm.enabled = TRUE AND u.enabled = TRUE
+    </insert>
+    <update id="advancePlanDueDate">
+        UPDATE maintenance_plans SET next_due_date = #{nextDueDate}
+        WHERE tenant_id = #{tenantId} AND id = #{planId}
+          AND enabled = TRUE AND next_due_date = #{expectedDueDate}
+    </update>
+    <select id="selectExecutionDetail" resultMap="executionView">
+        SELECT <include refid="executionColumns"/> FROM maintenance_executions
+        WHERE tenant_id = #{tenantId} AND id = #{id}
+    </select>
+    <!-- 每次强制执行当前读，避免SqlSession一级缓存重放早期权限状态。 -->
+    <select id="selectEnabledExecutorForUpdate" resultType="java.lang.Long" flushCache="true" useCache="false">
+        SELECT u.id
+        FROM tenant_memberships tm
+        INNER JOIN users u ON u.id = tm.user_id
+        INNER JOIN tenants t ON t.id = tm.tenant_id
+        WHERE tm.tenant_id = #{tenantId} AND tm.user_id = #{userId}
+          AND tm.enabled = TRUE AND u.enabled = TRUE AND t.enabled = TRUE
+        FOR UPDATE
+    </select>
+    <!-- 历史使用快照，不联查可变资料；两层归属条件不能省略。 -->
+    <select id="selectExecutionPage" resultMap="executionView">
+        SELECT <include refid="executionColumns"/>
+        FROM maintenance_executions
+        WHERE tenant_id = #{tenantId} AND plan_id = #{planId}
+        ORDER BY executed_at DESC, id DESC
+    </select>
+</mapper>

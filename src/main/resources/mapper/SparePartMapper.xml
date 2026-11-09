@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.inventory.mapper.SparePartMapper">
+    <!-- 只更新目录资料，不修改企业归属、库存数量及数据库审计时间。 -->
+    <!-- 可空文本直接赋值，支持清空为 null，不使用 if 跳过空值。 -->
+    <update id="updateCatalog">
+        UPDATE spare_parts
+        SET part_code = #{part.partCode},
+            name = #{part.name},
+            spec = #{part.spec,jdbcType=VARCHAR},
+            category = #{part.category,jdbcType=VARCHAR},
+            location = #{part.location,jdbcType=VARCHAR},
+            min_stock_quantity = #{part.minStockQuantity},
+            unit = #{part.unit},
+            enabled = #{part.enabled}
+        WHERE tenant_id = #{tenantId}
+          AND id = #{part.id}
+    </update>
+</mapper>
