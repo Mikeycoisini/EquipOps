@@ -31,6 +31,7 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 public class TenantMemberServiceImpl implements TenantMemberService {
+    private final com.audit.service.AuditEventService auditEventService;
     private final CurrentAccessService currentAccessService;//检查当前登录用户、当前企业和权限
     private final TenantMembershipMapper membershipMapper;//成员关系表,查询成员、修改成员状态,管理员是由成员关系、角色关联和角色共同确定的。
     private final UserMapper userMapper;//操作用户表 user,根据用户 ID 查询账号资料
@@ -165,6 +166,12 @@ public class TenantMemberServiceImpl implements TenantMemberService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "包含不存在的角色");
             }
         }
+        // 5.1 新成员与角色更新使用相同的授予白名单，不允许借添加成员授予其他角色。
+        List<String> allowed = Arrays.stream(grantableRoleCodes.split(",")).map(String::trim).toList();
+        for (RoleEntity role : roleEntity) {
+            // 每个角色均需在当前企业允许授予集合中。
+            if (!allowed.contains(role.getRoleCode())) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "该角色不允许授予");
+        }
         //6. 创建 TenantMembershipEntity,tenantId = 服务器取得的当前企业 ID,userId = 请求中的目标用户 ID,enabled = true
         TenantMembershipEntity membership = new TenantMembershipEntity();
         membership.setTenantId(tenantId);
@@ -204,6 +211,9 @@ public class TenantMemberServiceImpl implements TenantMemberService {
             BeanUtils.copyProperties(role, vo);
             return vo;
         }).toList());
+        // 11. 成功事件必须与成员及角色写入同事务，审计失败令本次新增整体回滚。
+        auditEventService.appendSuccess(memberAudit(tenantId, com.equipops.domain.enums.AuditAction.MEMBER_ADDED,
+                membershipId, Map.of("userId", userId, "enabled", true, "roleCodes", roleEntity.stream().map(RoleEntity::getRoleCode).sorted().toList())));
         return result;
     }
 
@@ -308,6 +318,16 @@ public class TenantMemberServiceImpl implements TenantMemberService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "不能移除企业最后一名有效管理员");
         }
 
+        // 5.1 使用锁定读取得最新角色关联，避免等待企业锁前的RR快照污染审计前值。
+        List<TenantMemberRoleEntity> beforeRelations = memberRoleMapper.selectList(new LambdaQueryWrapper<TenantMemberRoleEntity>()
+                .eq(TenantMemberRoleEntity::getTenantId, tenantId)
+                .eq(TenantMemberRoleEntity::getMembershipId, membershipId)
+                .last("FOR UPDATE"));
+        // 角色编码来自服务端角色目录，不来自请求正文。
+        List<Long> beforeIds = beforeRelations.stream().map(TenantMemberRoleEntity::getRoleId).toList();
+        // 空角色不生成无条件查询，非空集合一次读取编码并稳定排序。
+        List<String> beforeCodes = beforeIds.isEmpty() ? List.of() : roleMapper.selectList(new LambdaQueryWrapper<RoleEntity>()
+                .in(RoleEntity::getId, beforeIds)).stream().map(RoleEntity::getRoleCode).sorted().toList();
         //6. 删除该成员的旧角色关联；两个条件一起限定，不能删到其他企业或成员。
         memberRoleMapper.delete(new LambdaQueryWrapper<TenantMemberRoleEntity>()
                 .eq(TenantMemberRoleEntity::getTenantId, tenantId)
@@ -341,6 +361,13 @@ public class TenantMemberServiceImpl implements TenantMemberService {
             return vo;
         }).toList());
         // 任一步抛出异常，事务会回滚删除和新增，恢复原来的角色关联。
+        // 9. 仅实际角色集合变化才生成成功事件，原事务中的审计异常不能被吞掉。
+        List<String> afterCodes = newRoles.stream().map(RoleEntity::getRoleCode).sorted().toList();
+        if (!beforeCodes.equals(afterCodes)) {
+            // 固定字段与已校验角色编码，禁止把客户端原始正文作为摘要。
+            auditEventService.appendSuccess(memberAudit(tenantId, com.equipops.domain.enums.AuditAction.MEMBER_ROLES_CHANGED,
+                    membershipId, Map.of("field", "roleCodes", "before", beforeCodes, "after", afterCodes)));
+        }
         return result;
     }
 
@@ -401,6 +428,7 @@ public class TenantMemberServiceImpl implements TenantMemberService {
         }
         // 6. 比较原状态和目标状态。一样 → 不重复更新，直接组装返回结果。
         // 7. 设置 membership.enabled，执行更新并检查结果。
+        Boolean beforeEnabled = Teme.getEnabled();
         Boolean enabled = request.getEnabled();
         if (!enabled.equals(Teme.getEnabled())) {
             //设置成员状态。
@@ -437,6 +465,18 @@ public class TenantMemberServiceImpl implements TenantMemberService {
         if (!memberRoles.isEmpty()) {
             result.setRoles(memberRoles.get(0).getRoles());
         }
+        // 9. 相同状态的重复请求不重复记成功；有效状态变化与审计保持同事务。
+        if (!enabled.equals(beforeEnabled)) {
+            // 只记录布尔前后值，不记录账号或请求正文。
+            auditEventService.appendSuccess(memberAudit(tenantId, com.equipops.domain.enums.AuditAction.MEMBER_STATUS_CHANGED,
+                    membershipId, Map.of("field", "enabled", "before", beforeEnabled, "after", enabled)));
+        }
         return result;
+    }
+    private com.equipops.domain.dto.audit.AuditAppendCommand memberAudit(Long tenantId,
+            com.equipops.domain.enums.AuditAction action, Long objectId, Map<String, Object> changes) {
+        // 从服务端上下文取得操作者，失败时让业务事务回滚，不能相信请求中的身份。
+        return new com.equipops.domain.dto.audit.AuditAppendCommand(tenantId, currentAccessService.requireEnabledUserId(),
+                action, com.equipops.domain.enums.AuditObjectType.MEMBER, objectId, changes, null, null);
     }
 }

@@ -16,9 +16,11 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class AuditEventVO {
     /** 审计事件 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long id;
 
     /** 操作者用户 ID；系统任务为空 */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long actorUserId;
 
     /** 操作人在本企业成员关系中关联的当前显示名；无法关联时为空，不是历史姓名快照 */
@@ -34,6 +36,7 @@ public class AuditEventVO {
     private AuditObjectType objectType;
 
     /** 对象 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long objectId;
 
     /** 审计结果 */

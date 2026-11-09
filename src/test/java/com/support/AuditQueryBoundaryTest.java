@@ -29,7 +29,7 @@ class AuditQueryBoundaryTest {
  @Test void listHasChangeSummary() {
   var mapper=mock(AuditEventMapper.class);var access=mock(CurrentAccessService.class);
   when(access.requireTenantAdminTenantId()).thenReturn(1L);
-  var query=new AuditEventPageQueryDto();var row=new AuditEventVO();
+  var query=new AuditEventPageQueryDto();var row=new AuditEventVO();row.setAction(com.equipops.domain.enums.AuditAction.MEMBER_STATUS_CHANGED);row.setOutcome(com.equipops.domain.enums.AuditOutcome.SUCCESS);
   row.setChangesJson("{\"field\":\"enabled\",\"before\":true,\"after\":false}");
   when(mapper.countByQuery(1L,query)).thenReturn(1L);
   when(mapper.selectPage(1L,query,0L,20L)).thenReturn(List.of(row));
@@ -39,7 +39,7 @@ class AuditQueryBoundaryTest {
  @Test void sensitiveOrNestedSummaryIsNotRendered() {
   var mapper=mock(AuditEventMapper.class);var access=mock(CurrentAccessService.class);
   when(access.requireTenantAdminTenantId()).thenReturn(1L);
-  var query=new AuditEventPageQueryDto();var row=new AuditEventVO();
+  var query=new AuditEventPageQueryDto();var row=new AuditEventVO();row.setAction(com.equipops.domain.enums.AuditAction.MEMBER_STATUS_CHANGED);row.setOutcome(com.equipops.domain.enums.AuditOutcome.SUCCESS);
   row.setChangesJson("{\"field\":\"password\",\"before\":\"private-before\",\"after\":\"private-after\"}");
   when(mapper.countByQuery(1L,query)).thenReturn(1L);
   when(mapper.selectPage(1L,query,0L,20L)).thenReturn(List.of(row));

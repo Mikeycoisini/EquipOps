@@ -89,7 +89,8 @@ public class SecurityConfig {
                                            SecurityContextRepository securityContextRepository,
                                            CsrfTokenRepository csrfTokenRepository,
                                            CurrentAccessService currentAccessService,
-                                           ApiSecurityResponse responses) throws Exception {
+                                           ApiSecurityResponse responses,
+                                           com.audit.service.AuditEventService auditEventService) throws Exception {
         // 此链只处理 /api 范围；csrf 获取与登录允许匿名，其余接口需要登录。
         http.securityMatcher("/api/**")
                 .authenticationManager(authenticationManager)
@@ -122,7 +123,7 @@ public class SecurityConfig {
                             responses.write(response, 403, message);
                         }))
                 // 匿名身份处理之后检查账号最新状态；过滤器只在此注册一次，不另加 @Component。
-                .addFilterAfter(new AccessValidationFilter(currentAccessService, responses),
+                .addFilterAfter(new AccessValidationFilter(currentAccessService, responses, auditEventService),
                         AnonymousAuthenticationFilter.class);
         return http.build();
     }

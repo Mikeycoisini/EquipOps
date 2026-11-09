@@ -50,4 +50,8 @@ for attempt in $(seq 1 60); do
   sleep 1
 done
 python3 scripts/a1_smoke.py --base-url "http://127.0.0.1:$APP_PORT" > artifacts/a1/http-results.json
-echo 'A1 backend tests, repeat bootstrap and HTTP smoke passed'
+if [[ "${A2_MYSQL_TESTS:-}" == true ]]; then
+  mkdir -p artifacts/a2
+  A2_BASE_URL="http://127.0.0.1:$APP_PORT" python3 scripts/a2_smoke.py > artifacts/a2/http-results.json
+fi
+echo 'Backend tests, repeat bootstrap and enabled HTTP smoke checks passed'
