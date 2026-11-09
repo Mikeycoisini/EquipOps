@@ -1,0 +1,28 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: equipops_a1_local
+      MYSQL_USER: ${DB_USER:?Set DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Set protected DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${A1_MYSQL_ROOT_PASSWORD:?Set protected A1_MYSQL_ROOT_PASSWORD}
+    ports:
+      - '127.0.0.1:13306:3306'
+    volumes:
+      - a1-mysql:/var/lib/mysql
+    healthcheck:
+      test: ['CMD-SHELL', 'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root --silent']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7.4
+    ports:
+      - '127.0.0.1:16379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  a1-mysql:

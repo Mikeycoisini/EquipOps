@@ -46,3 +46,7 @@ build/
 *.log
 *.sql.gz
 *.dump
+
+# Python-based engineering tools
+__pycache__/
+*.py[cod]

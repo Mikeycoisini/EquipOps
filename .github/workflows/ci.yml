@@ -1,0 +1,63 @@
+name: Backend CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          # Synthetic credential for this short-lived CI service only.
+          MYSQL_ROOT_PASSWORD: ci-isolated-only
+          MYSQL_DATABASE: equipops_a1_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-isolated-only"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+      redis:
+        image: redis:7.4
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=3s --health-retries=12
+    env:
+      DB_URL: jdbc:mysql://127.0.0.1:3306/equipops_a1_ci?serverTimezone=Asia/Shanghai
+      DB_USER: root
+      DB_PASSWORD: ci-isolated-only
+      A1_DB_CONFIRM: equipops_a1_ci
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: ''
+      REDIS_SESSION_NAMESPACE: equipops:a1:ci
+      INVENTORY_EXPORT_ROOT: ${{ github.workspace }}/artifacts/a1/exports
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Generate ephemeral test password
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os,secrets
+          password=secrets.token_urlsafe(24)
+          print('::add-mask::'+password)
+          with open(os.environ['GITHUB_ENV'],'a') as output:
+              output.write('A1_TEST_PASSWORD='+password+'\n')
+          PY
+      - run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -v
+      - run: python3 scripts/check_public.py
+      - run: bash scripts/a1_verify.sh
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: a1-http-results
+          path: artifacts/a1/http-results.json

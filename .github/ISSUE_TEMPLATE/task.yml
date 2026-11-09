@@ -1,0 +1,24 @@
+name: 阶段需求或缺陷
+description: 明确需求ID、权限、数据和验收证据
+body:
+  - type: input
+    id: requirement
+    attributes:
+      label: 需求ID与阶段
+      placeholder: A1 / M1-R1
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 问题、目标与范围
+      description: 写明当前行为、预期行为、角色、状态、失败行为及范围外事项。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收条件与数据保护
+      description: 列出正常/拒绝/并发场景，隔离库、迁移版本及回退要求。禁止填写凭据或真实业务资料。
+    validations:
+      required: true

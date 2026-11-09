@@ -21,6 +21,12 @@ python3 scripts/check_a0.py --frontend ../OPS-V2.0-
 
 核对两仓受跟踪源码、必要构建入口及迁移版本，输出SHA-256和来源版本；不连接数据库，不替代编译或业务验收。前端检出路径不同时调整`--frontend`。
 
+## A1工程验证
+
+[A1复现步骤与实际验证](docs/plan/57-A1工程底座与实际验证.md)说明隔离MySQL/Redis启动、受保护变量、测试账号初始化及验证命令。后端使用完整JDK17，前端使用Node22.18；CI定义位于两仓各自的`.github/workflows/ci.yml`。
+
+设置并核对专用`equipops_a1_`库后执行`bash scripts/a1_verify.sh`，运行构建、测试、重复初始化和真实Session/CSRF检查。初始化器仅在测试类路径中，不会在产品启动时自动创建管理员。发布候选检查可用`python3 scripts/check_public.py . ../OPS-V2.0-`。
+
 ## 本地启动
 
 准备Java17、MySQL8与Redis。通过IDE运行配置或进程环境设置DB_PASSWORD，按实际服务配置设置REDIS_PASSWORD。其余参数可按下表覆盖。
