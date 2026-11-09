@@ -8,6 +8,18 @@
 - 前端仓库 [Mikeycoisini/OPS-V2.0-](https://github.com/Mikeycoisini/OPS-V2.0-)
 - [完整系统路线](docs/plan/51-V2.0完整系统总体实施方案.md)
 - [工程实施计划](docs/plan/52-V2.0GitHub工程实施计划.md)
+- [A0基线、差距、来源与迁移映射](docs/plan/55-A0基线差距来源与迁移映射.md)
+
+## A0静态基线复核
+
+需要Python3，在本仓库执行：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -v
+python3 scripts/check_a0.py --frontend ../OPS-V2.0-
+```
+
+核对两仓受跟踪源码、必要构建入口及迁移版本，输出SHA-256和来源版本；不连接数据库，不替代编译或业务验收。前端检出路径不同时调整`--frontend`。
 
 ## 本地启动
 
