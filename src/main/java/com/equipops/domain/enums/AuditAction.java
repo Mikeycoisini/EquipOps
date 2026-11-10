@@ -16,5 +16,10 @@ public enum AuditAction {
     /** 企业厂区创建。 */
     SITE_CREATED,
     /** 企业厂区配置修改。 */
-    SITE_UPDATED
+    SITE_UPDATED,
+    TEAM_CREATED,
+    TEAM_UPDATED,
+    TEAM_MEMBERS_CHANGED,
+    TEAM_SITE_SCOPES_CHANGED,
+    WORK_ORDER_REASSIGNED
 }

@@ -300,6 +300,12 @@ public class AuditEventServiceImpl implements AuditEventService {
         if ("roleCodes".equals(field) && before instanceof List<?> && after instanceof List<?>) {
             return "角色：[" + before + "] -> [" + after + "]";
         }
+        if ("membershipIds".equals(field) && before instanceof List<?> previous && after instanceof List<?> next) {
+            return "团队成员：[" + previous.size() + "] -> [" + next.size() + "]"; // 列表不展示成员ID正文。
+        }
+        if (Boolean.TRUE.equals(changes.get("reasonPresent")) && changes.containsKey("afterAssigneeUserId")) {
+            return "工单责任交接"; // 理由留在受授权业务日志，不写审计摘要。
+        }
         if ("siteIds".equals(field) && before instanceof List<?> previous && after instanceof List<?> next) {
             // 厂区范围列表摘要仅展示数量，详情保留经过白名单处理的ID集合。
             return "厂区范围：[" + previous.size() + "] -> [" + next.size() + "]";
@@ -312,7 +318,7 @@ public class AuditEventServiceImpl implements AuditEventService {
                 case "enabled" -> "启停状态";
                 default -> "";
             }).filter(value -> !value.isEmpty()).toList();
-            return labels.isEmpty() ? null : "厂区配置：" + String.join("、", labels);
+            return labels.isEmpty() ? null : "配置变更：" + String.join("、", labels);
         }
         if (changes.get("enabled") instanceof Boolean enabled && changes.get("isDefault") instanceof Boolean) {
             // 创建摘要同样只显示已确认的布尔配置。
@@ -377,15 +383,18 @@ public class AuditEventServiceImpl implements AuditEventService {
             if (changes.get("enabled") instanceof Boolean) safe.put("enabled", changes.get("enabled"));
         }
         // 5. 厂区范围变更只接受有限正整数ID集合和安全版本，未知正文全部丢弃。
-        if (action == com.equipops.domain.enums.AuditAction.MEMBER_SITE_SCOPES_CHANGED
-                && "siteIds".equals(changes.get("field"))) {
+        if ((action == com.equipops.domain.enums.AuditAction.MEMBER_SITE_SCOPES_CHANGED
+                || action == com.equipops.domain.enums.AuditAction.TEAM_SITE_SCOPES_CHANGED
+                || action == com.equipops.domain.enums.AuditAction.TEAM_MEMBERS_CHANGED)
+                && (action == com.equipops.domain.enums.AuditAction.TEAM_MEMBERS_CHANGED
+                    ? "membershipIds" : "siteIds").equals(changes.get("field"))) {
             List<String> before = safeSiteIds(changes.get("before"));
             List<String> after = safeSiteIds(changes.get("after"));
             Object version = changes.get("version");
             if (before != null && after != null && version instanceof Number number
                     && (version instanceof Long || version instanceof Integer)
                     && number.longValue() >= 0 && number.longValue() <= 9_007_199_254_740_991L) {
-                safe.put("field", "siteIds");
+                safe.put("field", changes.get("field"));
                 safe.put("before", before);
                 safe.put("after", after);
                 safe.put("version", number.longValue());
@@ -406,9 +415,45 @@ public class AuditEventServiceImpl implements AuditEventService {
             safe.put("beforeEnabled", changes.get("beforeEnabled"));
             safe.put("afterEnabled", changes.get("afterEnabled"));
         }
+        // 8. 团队元数据只保存固定布尔和字段名，名称正文不落统一审计。
+        if (action == com.equipops.domain.enums.AuditAction.TEAM_CREATED && changes.get("enabled") instanceof Boolean) {
+            safe.put("enabled", changes.get("enabled"));
+        }
+        if (action == com.equipops.domain.enums.AuditAction.TEAM_UPDATED
+                && changes.get("changedFields") instanceof List<?> fields && !fields.isEmpty() && fields.size() <= 2
+                && fields.stream().allMatch(field -> List.of("name", "enabled").contains(field))
+                && changes.get("beforeEnabled") instanceof Boolean && changes.get("afterEnabled") instanceof Boolean) {
+            safe.put("changedFields", fields.stream().distinct().toList());
+            safe.put("beforeEnabled", changes.get("beforeEnabled"));safe.put("afterEnabled", changes.get("afterEnabled"));
+        }
+        // 9. 改派只接受完整ID字段、安全相邻版本及固定理由标记，拒绝理由和其他正文。
+        if (action == com.equipops.domain.enums.AuditAction.WORK_ORDER_REASSIGNED
+                && changes.containsKey("beforeAssigneeUserId") && changes.containsKey("beforeTeamId") && changes.containsKey("afterTeamId")
+                && validAuditId(changes.get("beforeAssigneeUserId"), true) && validAuditId(changes.get("afterAssigneeUserId"), false)
+                && validAuditId(changes.get("beforeTeamId"), true) && validAuditId(changes.get("afterTeamId"), true)
+                && safeVersion(changes.get("beforeVersion")) && safeVersion(changes.get("version"))
+                && ((Number)changes.get("version")).longValue() == ((Number)changes.get("beforeVersion")).longValue() + 1
+                && Boolean.TRUE.equals(changes.get("reasonPresent"))) {
+            for (String key : List.of("beforeAssigneeUserId", "afterAssigneeUserId", "beforeTeamId", "afterTeamId", "beforeVersion", "version", "reasonPresent")) {
+                safe.put(key, changes.get(key)); // 已验证字段逐项转存，不遍历未知输入。
+            }
+        }
         // 8. 历史失败记录读取时仅保留已定义的安全错误码。
         if (changes.containsKey("errorCode")) safe.put("errorCode", safeErrorCode(changes.get("errorCode")));
         return safe;
+    }
+
+    private boolean validAuditId(Object value, boolean nullable) {
+        // 只允许规范Long正整数字符串；明确允许的旧责任字段才可为null。
+        if (value == null) return nullable;
+        if (!(value instanceof String text) || !text.matches("[1-9][0-9]{0,18}")) return false;
+        try { return Long.parseLong(text) > 0; } catch (NumberFormatException invalid) { return false; }
+    }
+
+    private boolean safeVersion(Object value) {
+        // 拒绝浮点数与越界值，避免审计输出伪造版本。
+        return (value instanceof Long || value instanceof Integer) && ((Number)value).longValue() >= 0
+                && ((Number)value).longValue() <= 9_007_199_254_740_991L;
     }
 
     private List<String> safeSiteIds(Object value) {

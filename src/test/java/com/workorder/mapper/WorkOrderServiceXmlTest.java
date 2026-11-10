@@ -26,6 +26,7 @@ class WorkOrderServiceXmlTest {
     private final WorkOrderEntity order = new WorkOrderEntity();
     private final List<WorkOrderLogEntity> logs = new ArrayList<>();
     private int assignedRows = 1;
+    private boolean targetAllowed = true;
     private int pageCalls;
     private int startRows = 1;
     private int startCalls;
@@ -97,7 +98,12 @@ class WorkOrderServiceXmlTest {
         EquipmentMapper equipment = proxy(EquipmentMapper.class, (p, method, args) -> {
             throw new AssertionError("派单不应修改设备");
         });
-        return new WorkOrderServiceImpl(orders, logMapper, users, equipment, access, memberships);
+        var service = new WorkOrderServiceImpl(orders, logMapper, users, equipment, access, memberships);
+        var qualification = org.mockito.Mockito.mock(com.workorder.service.impl.WorkOrderAssignmentAccess.class);
+        if (!targetAllowed) org.mockito.Mockito.doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "无个人厂区授权"))
+                .when(qualification).requireTarget(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.isNull());
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"assignmentAccess",qualification);
+        return service;
     }
 
     private WorkOrderDispatchDto dispatchRequest() {
@@ -105,6 +111,13 @@ class WorkOrderServiceXmlTest {
         request.setAssigneeUserId(20L);
         request.setActorUserId(999L); // 业务仍使用真实登录用户，而不是客户端操作人。
         return request;
+    }
+
+    @Test
+    void 原派单不能绕过目标个人厂区资格() {
+        targetAllowed=false;
+        var error=assertThrows(ResponseStatusException.class,()->service().dispatch(10L,dispatchRequest()));
+        assertEquals(400,error.getStatusCode().value());assertTrue(logs.isEmpty());
     }
 
     @Test

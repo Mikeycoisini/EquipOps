@@ -43,6 +43,9 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     /** 新工单及日志插入前的可信厂区写入锁。 */
     @org.springframework.beans.factory.annotation.Autowired
     private com.auth.scope.SiteWriteAccessService siteWriteAccess;
+    /** 原派单也必须验证当前个人厂区资格，防止旧入口绕过团队增量。 */
+    @org.springframework.beans.factory.annotation.Autowired
+    private WorkOrderAssignmentAccess assignmentAccess;
 
 
     private static final String PENDING = "PENDING";//待处理
@@ -248,6 +251,9 @@ public class WorkOrderServiceImpl implements WorkOrderService {
                 .eq(TenantMembershipEntity::getEnabled, true)) == 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "负责人必须是当前企业的有效成员");
         }
+        // 资格验证与范围变更共用企业锁，旧派单也不能向无个人厂区授权的成员派单。
+        assignmentAccess.lockAdmin();
+        assignmentAccess.requireTarget(tenantId, assigneeUserId, workOrderEntity.getSiteId(), null);
         // 设置工单负责人并保存工单。
         workOrderEntity.setAssigneeUserId(assigneeUserId);
         // 带上企业、待处理及未派单条件，防止两个请求覆盖彼此的负责人。

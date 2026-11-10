@@ -15,14 +15,23 @@ import lombok.NoArgsConstructor;
 public class WorkOrderVO {
 
     /** 维修工单 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long id;
 
     /** 所属企业 ID。 */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long tenantId;
 
     /** 所属厂区 ID。 */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long siteId;
 
+
+    /** 当前责任团队，可空表示个人接单。 */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
+    private Long teamId;
+    /** 状态与责任变更共同推进的乐观版本。 */
+    private Long version;
 
     /** 工单编号 */
     private String orderNo;
@@ -31,6 +40,7 @@ public class WorkOrderVO {
     private String title;
 
     /** 关联设备 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long equipmentId;
 
     /** 描述 */
@@ -43,6 +53,7 @@ public class WorkOrderVO {
     private WorkOrderStatus status;
 
     /** 工单负责人用户 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long assigneeUserId;
 
     /** 截止时间 */
@@ -52,6 +63,7 @@ public class WorkOrderVO {
     private LocalDateTime completedAt;
 
     /** 创建人用户 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long createdBy;
 
     /** 创建时间 */

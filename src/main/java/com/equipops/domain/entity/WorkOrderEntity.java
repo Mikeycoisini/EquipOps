@@ -35,6 +35,14 @@ public class WorkOrderEntity {
     @TableField(value = "site_id", updateStrategy = FieldStrategy.NEVER)
     private Long siteId;
 
+    /** 当前责任团队，可空表示个人接单。 */
+    @Column(name="team_id")
+    private Long teamId;
+    /** 状态与责任变更共同推进的乐观版本。 */
+    @Column(name="version", nullable=false)
+    @TableField(value="version", insertStrategy=FieldStrategy.NEVER, updateStrategy=FieldStrategy.NEVER)
+    private Long version = 0L;
+
     /** 工单编号 */
     @Column(name = "order_no", nullable = false, length = 40, unique = true)
     private String orderNo;
