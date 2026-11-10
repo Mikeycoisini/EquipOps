@@ -54,4 +54,8 @@ if [[ "${A2_MYSQL_TESTS:-}" == true ]]; then
   mkdir -p artifacts/a2
   A2_BASE_URL="http://127.0.0.1:$APP_PORT" python3 scripts/a2_smoke.py > artifacts/a2/http-results.json
 fi
+if [[ "${A3_MYSQL_TESTS:-}" == true ]]; then
+  mkdir -p artifacts/a3
+  A3_BASE_URL="http://127.0.0.1:$APP_PORT" python3 scripts/a3_smoke.py > artifacts/a3/http-results.json
+fi
 echo 'Backend tests, repeat bootstrap and enabled HTTP smoke checks passed'

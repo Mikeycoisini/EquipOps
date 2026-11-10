@@ -100,13 +100,56 @@
                 AND r.role_code = 'TENANT_ADMIN')
     </update>
 
-    <!-- 后台身份来自数据库任务，而不是请求Session；普通有效成员即可导出。 -->
-    <sql id="accessExists">
-        EXISTS (SELECT 1 FROM users u
+    <!-- 1. 后台固定任务身份；每条SQL重查账号、企业、成员、角色和启用厂区，不依赖HTTP上下文。 -->
+    <sql id="authorizedSite">s.tenant_id = #{task.tenantId} AND s.enabled = 1
+        AND EXISTS (SELECT 1 FROM users u
             JOIN tenant_memberships m ON m.user_id = u.id
             JOIN tenants te ON te.id = m.tenant_id
             WHERE u.id = #{task.createdBy} AND te.id = #{task.tenantId}
-              AND u.enabled = 1 AND m.enabled = 1 AND te.enabled = 1)
+              AND u.enabled = 1 AND m.enabled = 1 AND te.enabled = 1
+              AND (EXISTS (SELECT 1 FROM tenant_member_roles mr JOIN roles r ON r.id = mr.role_id
+                    WHERE mr.tenant_id = m.tenant_id AND mr.membership_id = m.id AND r.role_code = 'TENANT_ADMIN')
+                OR EXISTS (SELECT 1 FROM tenant_member_site_scopes sc
+                    WHERE sc.tenant_id = m.tenant_id AND sc.membership_id = m.id AND sc.site_id = s.id)))</sql>
+    <!-- 2. 快照必须非空，当前权限必须覆盖全部快照；新增授权不能扩大既有任务。 -->
+    <sql id="accessExists">
+        EXISTS (SELECT 1 FROM inventory_export_task_sites snapshot
+            WHERE snapshot.task_id = #{task.id} AND snapshot.tenant_id = #{task.tenantId})
+        AND NOT EXISTS (SELECT 1 FROM inventory_export_task_sites snapshot
+            LEFT JOIN sites s ON s.id = snapshot.site_id AND s.tenant_id = snapshot.tenant_id
+            WHERE snapshot.task_id = #{task.id} AND snapshot.tenant_id = #{task.tenantId}
+              AND (s.id IS NULL OR NOT (<include refid="authorizedSite"/>)))
+    </sql>
+    <!-- 3. 创建事务在成员锁内读取授权厂区，并以稳定顺序保存非空快照。 -->
+    <select id="selectAuthorizedSiteIds" resultType="long" timeout="10">
+        SELECT s.id FROM sites s WHERE <include refid="authorizedSite"/> ORDER BY s.id
+    </select>
+    <select id="hasCreateFilterAccess" resultType="boolean" timeout="10">
+        SELECT COUNT(*) &gt; 0 FROM (SELECT 1) candidate
+        <where>
+            <if test="request.warehouseId != null">
+                EXISTS (SELECT 1 FROM warehouses wf JOIN sites s ON s.id = wf.site_id AND s.tenant_id = wf.tenant_id
+                    WHERE wf.id = #{request.warehouseId} AND wf.tenant_id = #{task.tenantId}
+                      AND <include refid="authorizedSite"/>)
+            </if>
+            <if test="request.workOrderId != null">
+                AND EXISTS (SELECT 1 FROM work_orders wof JOIN sites s ON s.id = wof.site_id AND s.tenant_id = wof.tenant_id
+                    WHERE wof.id = #{request.workOrderId} AND wof.tenant_id = #{task.tenantId}
+                      AND <include refid="authorizedSite"/>)
+            </if>
+        </where>
+    </select>
+    <insert id="insertTaskSites">
+        INSERT INTO inventory_export_task_sites (task_id, tenant_id, site_id) VALUES
+        <foreach collection="siteIds" item="siteId" separator=",">(#{task.id}, #{task.tenantId}, #{siteId})</foreach>
+    </insert>
+    <!-- 4. 流水仓库和关联工单的厂区均须在不可变快照内，全快照同时通过实时授权。 -->
+    <sql id="exportRowSites">
+        AND <include refid="accessExists"/>
+        AND EXISTS (SELECT 1 FROM inventory_export_task_sites ws
+            WHERE ws.task_id = #{task.id} AND ws.tenant_id = t.tenant_id AND ws.site_id = w.site_id)
+        AND (t.work_order_id IS NULL OR EXISTS (SELECT 1 FROM inventory_export_task_sites os
+            WHERE os.task_id = #{task.id} AND os.tenant_id = t.tenant_id AND os.site_id = wo.site_id))
     </sql>
     <select id="hasExportAccess" resultType="boolean" timeout="10">
         SELECT <include refid="accessExists"/>
@@ -129,8 +172,13 @@
             deadline_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 5 MINUTE), updated_at = CURRENT_TIMESTAMP(6)
         WHERE <include refid="ownedLive"/> AND status = 'QUEUED' AND <include refid="accessExists"/>
     </update>
-    <select id="selectUpperBound" resultType="long" timeout="10">
-        SELECT COALESCE(MAX(id), 0) FROM inventory_transactions WHERE tenant_id = #{tenantId}
+    <!-- 后台上界与实际批次使用完全相同的厂区约束。 -->
+    <select id="selectScopedUpperBound" resultType="long" timeout="10">
+        SELECT COALESCE(MAX(t.id), 0) FROM inventory_transactions t
+        LEFT JOIN warehouses w ON w.id = t.warehouse_id AND w.tenant_id = t.tenant_id
+        LEFT JOIN work_orders wo ON wo.id = t.work_order_id AND wo.tenant_id = t.tenant_id
+        WHERE t.tenant_id = #{task.tenantId}
+        <include refid="exportRowSites"/>
     </select>
     <update id="saveUpperBound" timeout="10">
         UPDATE inventory_export_tasks SET upper_bound_id = #{upperBound}, updated_at = CURRENT_TIMESTAMP(6)
@@ -143,6 +191,7 @@
     <select id="selectExportBatch" resultMap="com.inventory.mapper.InventoryTransactionMapper.transactionDetailsMap" timeout="15">
         <include refid="com.inventory.mapper.InventoryTransactionMapper.transactionDetailsQuery"/>
         WHERE t.tenant_id = #{task.tenantId} AND t.id &gt; #{lastId} AND t.id &lt;= #{task.upperBoundId}
+        <include refid="exportRowSites"/>
         <if test="task.warehouseId != null">AND t.warehouse_id = #{task.warehouseId}</if>
         <if test="task.sparePartId != null">AND t.spare_part_id = #{task.sparePartId}</if>
         <if test="task.workOrderId != null">AND t.work_order_id = #{task.workOrderId}</if>

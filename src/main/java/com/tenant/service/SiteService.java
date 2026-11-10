@@ -11,6 +11,9 @@ public interface SiteService {
     /** S1 仅返回当前企业启用的默认厂区；初始化缺失须明确报错。 */
     List<SiteVO> getDefaultSites();
 
+    /** 返回当前成员可见的厂区目录，包含停用状态。 */
+    List<SiteVO> getSiteCatalog();
+
     SiteVO getSite(Long id);
 
     SiteVO createSite(@Valid SiteUpsertDto request);

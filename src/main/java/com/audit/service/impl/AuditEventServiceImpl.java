@@ -300,6 +300,24 @@ public class AuditEventServiceImpl implements AuditEventService {
         if ("roleCodes".equals(field) && before instanceof List<?> && after instanceof List<?>) {
             return "角色：[" + before + "] -> [" + after + "]";
         }
+        if ("siteIds".equals(field) && before instanceof List<?> previous && after instanceof List<?> next) {
+            // 厂区范围列表摘要仅展示数量，详情保留经过白名单处理的ID集合。
+            return "厂区范围：[" + previous.size() + "] -> [" + next.size() + "]";
+        }
+        if (changes.get("changedFields") instanceof List<?> fields) {
+            // 修改摘要仅依据白名单字段生成固定标签，名称地址正文不可进入列表。
+            List<String> labels = fields.stream().map(value -> switch (String.valueOf(value)) {
+                case "name" -> "名称";
+                case "address" -> "地址";
+                case "enabled" -> "启停状态";
+                default -> "";
+            }).filter(value -> !value.isEmpty()).toList();
+            return labels.isEmpty() ? null : "厂区配置：" + String.join("、", labels);
+        }
+        if (changes.get("enabled") instanceof Boolean enabled && changes.get("isDefault") instanceof Boolean) {
+            // 创建摘要同样只显示已确认的布尔配置。
+            return "厂区创建：" + (enabled ? "启用" : "停用");
+        }
         return null;
     }
 
@@ -358,9 +376,56 @@ public class AuditEventServiceImpl implements AuditEventService {
             if (roles != null) safe.put("roleCodes", roles);
             if (changes.get("enabled") instanceof Boolean) safe.put("enabled", changes.get("enabled"));
         }
-        // 5. 历史失败记录读取时仅保留已定义的安全错误码。
+        // 5. 厂区范围变更只接受有限正整数ID集合和安全版本，未知正文全部丢弃。
+        if (action == com.equipops.domain.enums.AuditAction.MEMBER_SITE_SCOPES_CHANGED
+                && "siteIds".equals(changes.get("field"))) {
+            List<String> before = safeSiteIds(changes.get("before"));
+            List<String> after = safeSiteIds(changes.get("after"));
+            Object version = changes.get("version");
+            if (before != null && after != null && version instanceof Number number
+                    && (version instanceof Long || version instanceof Integer)
+                    && number.longValue() >= 0 && number.longValue() <= 9_007_199_254_740_991L) {
+                safe.put("field", "siteIds");
+                safe.put("before", before);
+                safe.put("after", after);
+                safe.put("version", number.longValue());
+            }
+        }
+        // 6. 厂区创建只保留启用、默认标记，不接收名称、地址和编号正文。
+        if (action == com.equipops.domain.enums.AuditAction.SITE_CREATED
+                && changes.get("enabled") instanceof Boolean && changes.get("isDefault") instanceof Boolean) {
+            safe.put("enabled", changes.get("enabled"));
+            safe.put("isDefault", changes.get("isDefault"));
+        }
+        // 7. 厂区修改仅记录固定变化字段名与布尔状态，历史读取同样不展示正文。
+        if (action == com.equipops.domain.enums.AuditAction.SITE_UPDATED
+                && changes.get("changedFields") instanceof List<?> fields && !fields.isEmpty()
+                && fields.size() <= 3 && fields.stream().allMatch(field -> field instanceof String name && List.of("name", "address", "enabled").contains(name))
+                && changes.get("beforeEnabled") instanceof Boolean && changes.get("afterEnabled") instanceof Boolean) {
+            safe.put("changedFields", fields.stream().distinct().toList());
+            safe.put("beforeEnabled", changes.get("beforeEnabled"));
+            safe.put("afterEnabled", changes.get("afterEnabled"));
+        }
+        // 8. 历史失败记录读取时仅保留已定义的安全错误码。
         if (changes.containsKey("errorCode")) safe.put("errorCode", safeErrorCode(changes.get("errorCode")));
         return safe;
+    }
+
+    private List<String> safeSiteIds(Object value) {
+        // 1. 白名单同时用于写入与历史读取，限制集合容量与单项格式。
+        if (!(value instanceof Collection<?> ids) || ids.size() > 500) return null;
+        // 2. 将ID转换为正数Long后排序，拒绝任意正文、嵌套对象及溢出整数。
+        var safe = new java.util.TreeSet<Long>();
+        for (Object id : ids) {
+            if (!(id instanceof String text) || !text.matches("[1-9][0-9]{0,18}")) return null;
+            try {
+                safe.add(Long.parseLong(text));
+            } catch (NumberFormatException overflow) {
+                return null;
+            }
+        }
+        // 3. 返回字符串ID保留浏览器BIGINT精度，不输出任何原始未知值。
+        return safe.stream().map(String::valueOf).toList();
     }
 
     private List<String> safeRoles(Object value) {

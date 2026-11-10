@@ -19,7 +19,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class InventoryExportDownloadTest {
     @TempDir Path root;
     InventoryExportDownloadServiceImpl service;InventoryExportDownloadRecord task;
-    int accessCalls,reads,missingUpdates;boolean access=true,lateAccess=true,downloadable=true,failMark,expireLate;
+    int accessCalls,reads,missingUpdates,permissionChecks;boolean hasSnapshot=true;
+    boolean access=true,lateAccess=true,downloadable=true,failMark,expireLate,revokeAfterOpen;
     Path file;
     @BeforeEach void setup()throws Exception{
         task=new InventoryExportDownloadRecord();task.setId(9L);task.setTenantId(7L);task.setCreatedBy(4L);
@@ -35,7 +36,13 @@ class InventoryExportDownloadTest {
             accessCalls++;if(!access||accessCalls>1&&!lateAccess)throw new ResponseStatusException(HttpStatus.FORBIDDEN,"成员资格失效");return new TenantAccess(4L,tenant,3L,Set.of());}));
         ReflectionTestUtils.setField(service,"downloadMapper",proxy(InventoryExportDownloadMapper.class,(p,m,a)->switch(m.getName()){
             case "selectOwnDownload"->{reads++;assertArrayEquals(new Object[]{7L,4L,9L},a);yield task;}
-            case "canDownload"->{if(expireLate)task.setExpired(true);yield downloadable&&!expireLate;}
+            case "hasTaskSites"->hasSnapshot;
+            case "canDownload"->{
+                permissionChecks++;
+                // 首次检查保持有效，第二次检查模拟句柄打开后的状态变化。
+                if(expireLate&&permissionChecks>=2)task.setExpired(true);
+                yield downloadable&&!((expireLate||revokeAfterOpen)&&permissionChecks>=2);
+            }
             case "markFileMissing"->{missingUpdates++;if(failMark)throw new IllegalStateException("database unavailable");yield 1;}
             default->throw new AssertionError(m.getName());
         }));
@@ -43,6 +50,30 @@ class InventoryExportDownloadTest {
     <T>T proxy(Class<T> t,InvocationHandler h){return t.cast(Proxy.newProxyInstance(getClass().getClassLoader(),new Class<?>[]{t},h));}
     void rejects(int code){assertEquals(code,assertThrows(ResponseStatusException.class,()->service.openDownload(9L)).getStatusCode().value());}
     @Test void 独立实现返回已打开的流并由调用者关闭()throws Exception{var opened=service.openDownload(9L);assertEquals("库存流水-9.xlsx",opened.fileName());assertEquals(4,opened.fileSize());assertArrayEquals(new byte[]{1,2,3,4},opened.input().readAllBytes());opened.close();assertThrows(java.io.IOException.class,()->opened.input().read());assertEquals(2,accessCalls);}
+    @Test void 无厂区快照的旧文件拒绝下载要求重导(){hasSnapshot=false;rejects(409);}
+    @Test void 打开前撤权不访问文件不记录缺失且释放下载名额()throws Exception{
+        // 1. 文件访问替身记录实际调用，单名额确保每次拒绝都释放租约。
+        var fileAccess=org.mockito.Mockito.spy(new InventoryExportFileAccess());
+        ReflectionTestUtils.setField(service,"fileAccess",fileAccess);
+        ReflectionTestUtils.setField(service,"downloadGate",new InventoryDownloadGate(1,1));
+        downloadable=false;
+        // 2. 状态已验证但完整厂区授权失效时，打开文件前即返回403。
+        for(int attempt=0;attempt<3;attempt++) rejects(403);
+        org.mockito.Mockito.verifyNoInteractions(fileAccess);
+        assertEquals(0,missingUpdates);
+        // 3. 恢复权限后能够占用同一配额，证明失败路径没有遗留名额。
+        downloadable=true;
+        try(var opened=service.openDownload(9L)){assertEquals(4,opened.fileSize());}
+    }
+    @Test void 下载交付后撤权下一次读取失败并允许关闭释放配额()throws Exception{
+        var opened=service.openDownload(9L);
+        assertEquals(1,opened.input().read());
+        downloadable=false;
+        assertThrows(java.io.IOException.class,()->opened.input().read(new byte[2]));
+        opened.close();
+        downloadable=true;
+        try(var again=service.openDownload(9L)){assertEquals(4,again.fileSize());}
+    }
     @Test void 非本人或其他企业与不存在统一404(){task=null;rejects(404);}
     @Test void 无效身份在查任务前被拒绝(){access=false;rejects(403);assertEquals(0,reads);}
     @Test void 打开文件后撤权关闭句柄且不交付下载()throws Exception{lateAccess=false;rejects(403);Files.delete(file);assertFalse(Files.exists(file));}
@@ -52,7 +83,7 @@ class InventoryExportDownloadTest {
     @Test void 目录穿越与绝对路径不能读取(){for(var key:List.of("../secret.xlsx",root.resolve("secret.xlsx").toString(),"9-other/inventory.xlsx")){task.setStorageKey(key);rejects(409);}}
     @Test void 文件大小不符不能伪装下载成功(){task.setFileSize(100L);rejects(409);}
     @Test void 缺失记录失败不能声称错误已保存()throws Exception{Files.delete(file);failMark=true;rejects(500);}
-    @Test void 发布状态晚到变化后不能交付流()throws Exception{downloadable=false;rejects(409);Files.delete(file);}
+    @Test void 发布状态晚到变化后不能交付流()throws Exception{revokeAfterOpen=true;rejects(409);Files.delete(file);}
     @Test void 非法ID返回400且不查任务(){for(Long id:Arrays.asList(null,0L,-1L))assertEquals(400,assertThrows(ResponseStatusException.class,()->service.openDownload(id)).getStatusCode().value());assertEquals(0,reads);}
     @Test void 打开句柄后到期仍返回410而非交付文件()throws Exception{expireLate=true;rejects(410);Files.delete(file);}
     @Test void 同用户超过两个打开下载必须立即429且关闭后恢复()throws Exception{

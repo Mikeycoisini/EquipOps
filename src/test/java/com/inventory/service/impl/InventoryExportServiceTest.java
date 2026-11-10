@@ -26,6 +26,7 @@ class InventoryExportServiceTest {
     InventoryExportTaskEntity task;
     List<InventoryTransactionVO> rows = new ArrayList<>();
     InventoryExportStatus state = InventoryExportStatus.QUEUED;
+    boolean emptySiteScope, snapshotFails;
     boolean committed, permitted=true, owned=true, claimed=true, published=true, live=true;
     boolean reject, rejectFails, publishThrows, revokeAfterBatch, cancelAfterBatch;
     boolean keepFiles=true;
@@ -55,6 +56,9 @@ class InventoryExportServiceTest {
         ReflectionTestUtils.setField(service,"taskMapper",proxy(InventoryExportTaskMapper.class,(p,m,a)-> {
             switch(m.getName()) {
                 case "selectEnabledMembershipForUpdate": return 2L;
+                case "selectAuthorizedSiteIds": return emptySiteScope ? List.of() : List.of(11L);
+                case "hasCreateFilterAccess": return true;
+                case "insertTaskSites": if(snapshotFails)throw new IllegalStateException("snapshot insert failed"); return 1;
                 case "selectActiveTaskIdsForUpdate": return List.of();
                 case "insertQueuedTask":
                     var created=(InventoryExportTaskEntity)a[0]; created.setId(9L);
@@ -65,7 +69,7 @@ class InventoryExportServiceTest {
                 case "isOwnedQueued": return owned && state==InventoryExportStatus.QUEUED;
                 case "hasExportAccess": return permitted;
                 case "startRunning": if(claimed) state=InventoryExportStatus.RUNNING; return claimed?1:0;
-                case "selectUpperBound": return 200000L;
+                case "selectScopedUpperBound": return 200000L;
                 case "saveUpperBound": return live?1:0;
                 case "isRunningLive": return live && state==InventoryExportStatus.RUNNING;
                 case "selectExportBatch":
@@ -106,6 +110,16 @@ class InventoryExportServiceTest {
     void execute() { configureFiles(); ReflectionTestUtils.invokeMethod(service,"executeExport",9L); }
     @Test void 提交在事务提交后执行且返回真实任务() {
         assertEquals(9L,service.create(new InventoryExportCreateDto()).getId()); assertNotNull(pending);
+    }
+    @Test void 无授权厂区不能创建或投递导出() {
+        emptySiteScope=true;
+        assertEquals(403,assertThrows(ResponseStatusException.class,()->service.create(new InventoryExportCreateDto())).getStatusCode().value());
+        assertNull(pending);
+    }
+    @Test void 快照保存失败不能提交执行器() {
+        snapshotFails=true;
+        assertThrows(IllegalStateException.class,()->service.create(new InventoryExportCreateDto()));
+        assertNull(pending);
     }
     @Test void 空请求返回400而不是空指针() {
         assertEquals(400,assertThrows(ResponseStatusException.class,()->service.create(null)).getStatusCode().value());

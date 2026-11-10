@@ -40,6 +40,10 @@ import static com.equipops.domain.enums.WorkOrderStatus.IN_PROGRESS;
 @Service
 @RequiredArgsConstructor
 public class WorkOrderServiceImpl implements WorkOrderService {
+    /** 新工单及日志插入前的可信厂区写入锁。 */
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.auth.scope.SiteWriteAccessService siteWriteAccess;
+
 
     private static final String PENDING = "PENDING";//待处理
     //
@@ -89,6 +93,14 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         if (equipment == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "设备不存在");
         }
+        // 新增工单前锁定当前授权，并用父设备当前读阻止删除/归属变化穿过INSERT。
+        siteWriteAccess.lockSite(equipment.getSiteId());
+        // 锁定父设备；授权成员和厂区的锁保持到工单及日志共同提交。
+        equipment = equipmentMapper.selectOne(new LambdaQueryWrapper<EquipmentEntity>()
+                .eq(EquipmentEntity::getTenantId, tenantId)
+                .eq(EquipmentEntity::getId, request.getEquipmentId()).last("FOR UPDATE"));
+        // 父对象在等待期间不可用时不能继续创建。
+        if (equipment == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "设备不存在");
         //设置创建人 createdBy。有登录用户上下文时从当前登录用户取得，不要直接信任请求体传入的用户 ID。
         //项目目前没有登录上下文和 UserMapper，所以 createdBy 只能暂时信任请求体。
         // 上面的说明是旧版本背景；现已具备登录上下文，忽略请求体创建人。

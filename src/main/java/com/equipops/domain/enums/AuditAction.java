@@ -10,5 +10,11 @@ public enum AuditAction {
     /** 企业成员角色变更。 */
     MEMBER_ROLES_CHANGED,
     /** 企业成员启用或停用。 */
-    MEMBER_STATUS_CHANGED
+    MEMBER_STATUS_CHANGED,
+    /** 企业成员显式厂区范围变更。 */
+    MEMBER_SITE_SCOPES_CHANGED,
+    /** 企业厂区创建。 */
+    SITE_CREATED,
+    /** 企业厂区配置修改。 */
+    SITE_UPDATED
 }

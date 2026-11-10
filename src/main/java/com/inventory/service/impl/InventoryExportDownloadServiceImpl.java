@@ -65,6 +65,15 @@ public class InventoryExportDownloadServiceImpl implements InventoryExportDownlo
 
             // 3. 不可见404，成功且过期410，其他未成功状态409；时间判断来自数据库。
             validateState(task);
+            // 3.1 旧任务没有可信厂区快照时拒绝重用文件，必须重新导出。
+            if (!downloadMapper.hasTaskSites(task)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"导出任务缺少厂区授权快照，请重新导出");
+            }
+
+            // 3.2 打开文件前复核全部厂区快照，撤权主体不得触发磁盘访问或文件缺失写入。
+            if (!downloadMapper.canDownload(task)) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,"导出厂区权限或文件状态已变化，请重新导出");
+            }
 
             // 4. 验证固定存储键并取得目录句柄，目录在打开叶文件前已固定，关闭前不能被路径替换绕过。
             directory = pinFile(task);
@@ -83,7 +92,7 @@ public class InventoryExportDownloadServiceImpl implements InventoryExportDownlo
             }
 
             // 7. 把输入流、目录句柄和并发名额的关闭责任一起交付Controller，非阻塞发送结束/超时均释放。
-            var opened = new InventoryExportDownloadFile(ownedStream(channel,directory,lease), "库存流水-" + taskId + ".xlsx", size);
+            var opened = new InventoryExportDownloadFile(ownedStream(channel,directory,lease,task), "库存流水-" + taskId + ".xlsx", size);
             handedOff = true;
             return opened;
         } catch (IOException failure) {
@@ -161,10 +170,40 @@ public class InventoryExportDownloadServiceImpl implements InventoryExportDownlo
         return result;
     }
 
-    private InputStream ownedStream(SeekableByteChannel channel,InventoryExportFileAccess.PinnedDirectory directory,InventoryDownloadGate.Lease lease) {
+    private InputStream ownedStream(SeekableByteChannel channel,InventoryExportFileAccess.PinnedDirectory directory,InventoryDownloadGate.Lease lease, InventoryExportDownloadRecord task) {
         // 1. 文件仍是流式读取，把目录句柄与配额绑定输入流，Controller不必知道平台实现。
         return new FilterInputStream(Channels.newInputStream(channel)) {
             private final AtomicBoolean closed = new AtomicBoolean();
+            /** 1. 每次读取前按固定任务身份重查全快照授权，不从容器回调读取HTTP身份。 */
+            private void requireReadable() throws IOException {
+                // 2. 已关闭的流立即停止，不再执行数据库查询。
+                if (closed.get()) throw new IOException("下载流已关闭");
+                // 3. 授权、有效期或数据库不可用均停止交付，失败仍关闭全部句柄并归还并发名额。
+                try {
+                    if (downloadMapper.canDownload(task)) return;
+                } catch (RuntimeException failure) {
+                    // 4. 数据库错误只作为内部异常原因，不把SQL或存储信息写入公开响应。
+                    IOException stopped = new IOException("下载授权检查失败",failure);
+                    try { close(); } catch (IOException closeFailure) { stopped.addSuppressed(closeFailure); }
+                    throw stopped;
+                }
+                // 5. 撤权或文件状态变化后拒绝继续读取，已经发送的数据无法收回。
+                IOException stopped = new IOException("下载权限或文件状态已变化，请重新导出");
+                try { close(); } catch (IOException closeFailure) { stopped.addSuppressed(closeFailure); }
+                throw stopped;
+            }
+            @Override public int read() throws IOException {
+                // 1. 单字节读取与分块读取使用相同的实时授权规则。
+                requireReadable();
+                // 2. 直接读取底层输入流，避免FilterInputStream转发产生重复检查。
+                return in.read();
+            }
+            @Override public int read(byte[] bytes,int offset,int length) throws IOException {
+                // 1. 每个文件块开始前复核授权，容器背压期间不会保持过期授权快照。
+                requireReadable();
+                // 2. 每次最多交付调用方请求的固定块，撤权窗口为检查到输出间的一块及已缓存字节。
+                return in.read(bytes,offset,length);
+            }
             @Override public void close() throws IOException {
                 // 2. 超时、完成和错误回调只允许关闭一次；即使通道关闭失败，也继续关闭目录并归还名额。
                 if (!closed.compareAndSet(false,true)) return;

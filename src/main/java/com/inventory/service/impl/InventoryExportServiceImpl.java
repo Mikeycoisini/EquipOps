@@ -170,6 +170,16 @@ public class InventoryExportServiceImpl implements InventoryExportService {
             if (Id == null) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前企业成员关系已失效");
             }
+            // 2.1 在成员锁内取得固定创建人的实时厂区范围，空范围不能提交后台任务。
+            List<Long> siteIds = taskMapper.selectAuthorizedSiteIds(submitted);
+            // 2.2 不接受空快照，避免旧任务或空集合被误解释为企业全量权限。
+            if (siteIds == null || siteIds.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前没有可导出的厂区权限");
+            }
+            // 2.3 仓库与关联工单必须分别通过实时厂区权限验证。
+            if (!taskMapper.hasCreateFilterAccess(submitted, request)) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "导出筛选对象不存在或不可访问");
+            }
             // 检查活动任务：已经有未结束任务时返回409。
             List<Long> activeTaskIds = taskMapper.selectActiveTaskIdsForUpdate(tenantId, userId);
             if (!activeTaskIds.isEmpty()) {
@@ -181,6 +191,10 @@ public class InventoryExportServiceImpl implements InventoryExportService {
             //检查数据是否插入成功
             if (rows != 1 || taskEntity.getId() == null) {
                 throw new IllegalStateException("导出任务保存失败");
+            }
+            // 3.1 快照与任务同事务插入，任何保存失败均回滚且不向执行器投递。
+            if (taskMapper.insertTaskSites(taskEntity, siteIds) != siteIds.size()) {
+                throw new IllegalStateException("导出厂区快照保存失败");
             }
             // 4. 按企业、本人和任务ID查询公开VO，返回给外面的task变量。
             InventoryExportTaskVO taskVO = taskMapper.selectOwnTask(tenantId, userId, taskEntity.getId());
@@ -310,7 +324,7 @@ public class InventoryExportServiceImpl implements InventoryExportService {
             //    后续只查询不超过该上界的流水，避免通常后续新增记录不断进入导出。
             //    这不等于严格的数据库时间点快照。
 
-            Long upperBound = taskMapper.selectUpperBound(task.getTenantId());
+            Long upperBound = taskMapper.selectScopedUpperBound(task);
             if (upperBound == null || taskMapper.saveUpperBound(task,upperBound) != 1) {
                 throw new ExportStopped("EXECUTION_LOST","任务执行资格已失效");
             }
@@ -408,7 +422,7 @@ public class InventoryExportServiceImpl implements InventoryExportService {
 
     private void requirePermission(InventoryExportTaskEntity task) {
         // 1. 按内部任务的企业和用户重查三项启用状态；撤权立即停止后续批次及发布。
-        if (!taskMapper.hasExportAccess(task)) throw new ExportStopped("ACCESS_REVOKED","账号、企业或成员关系已失效");
+        if (!taskMapper.hasExportAccess(task)) throw new ExportStopped("ACCESS_REVOKED","账号、企业、成员或厂区权限已失效，请重新导出");
     }
 
     private void checkExecution(InventoryExportTaskEntity task) {

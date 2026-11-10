@@ -51,10 +51,19 @@ public interface InventoryExportTaskMapper extends BaseMapper<InventoryExportTas
                              @Param("userId") Long userId,
                              @Param("taskId") Long taskId);
 
+    /** 从固定任务创建人实时读取启用厂区，管理员覆盖本企业全部启用厂区。 */
+    List<Long> selectAuthorizedSiteIds(@Param("task") InventoryExportTaskEntity task);
+    /** 在同一创建事务验证仓库与关联工单均属于创建人的实时厂区范围。 */
+    boolean hasCreateFilterAccess(@Param("task") InventoryExportTaskEntity task,
+                                 @Param("request") InventoryExportCreateDto request);
+    /** 与任务同事务保存不可扩大的非空厂区快照。 */
+    int insertTaskSites(@Param("task") InventoryExportTaskEntity task, @Param("siteIds") List<Long> siteIds);
+
     boolean hasExportAccess(@Param("task") InventoryExportTaskEntity task);
     boolean isOwnedQueued(@Param("task") InventoryExportTaskEntity task);
     int startRunning(@Param("task") InventoryExportTaskEntity task);
-    Long selectUpperBound(@Param("tenantId") Long tenantId);
+    /** 后台使用固定任务身份和厂区快照确定上界。 */
+    Long selectScopedUpperBound(@Param("task") InventoryExportTaskEntity task);
     int saveUpperBound(@Param("task") InventoryExportTaskEntity task, @Param("upperBound") Long upperBound);
     boolean isRunningLive(@Param("task") InventoryExportTaskEntity task);
     List<InventoryTransactionVO> selectExportBatch(@Param("task") InventoryExportTaskEntity task,

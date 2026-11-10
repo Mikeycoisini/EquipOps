@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 public class RoleVO {
 
     /** 角色 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long id;
 
     /** 角色编码 */

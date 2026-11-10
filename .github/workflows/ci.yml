@@ -32,6 +32,7 @@ jobs:
       DB_PASSWORD: ci-isolated-only
       A1_DB_CONFIRM: equipops_a1_ci
       A2_MYSQL_TESTS: 'true'
+      A3_MYSQL_TESTS: 'true'
       REDIS_HOST: 127.0.0.1
       REDIS_PORT: '6379'
       REDIS_PASSWORD: ''
@@ -64,3 +65,4 @@ jobs:
           path: |
             artifacts/a1/http-results.json
             artifacts/a2/http-results.json
+            artifacts/a3/http-results.json

@@ -12,12 +12,15 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class TenantMemberVO {
     /** 成员关系 ID，不是用户 ID。 */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long id;
 
     /** 企业 ID。 */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long tenantId;
 
     /** 全局用户 ID。 */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape = com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long userId;
 
     /** 用户登录账号。 */

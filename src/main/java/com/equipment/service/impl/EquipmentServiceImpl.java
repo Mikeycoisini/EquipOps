@@ -30,6 +30,10 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 @RequiredArgsConstructor
 public class EquipmentServiceImpl extends ServiceImpl<EquipmentMapper, EquipmentEntity> implements EquipmentService {
+    /** INSERT不经过SQL权限插件，新增前锁定可信授权和厂区。 */
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.auth.scope.SiteWriteAccessService siteWriteAccess;
+
     private final EquipmentMapper equipmentMapper;
     private final UserMapper userMapper;
     /**
@@ -56,6 +60,8 @@ public class EquipmentServiceImpl extends ServiceImpl<EquipmentMapper, Equipment
     public EquipmentEntity addEquipment(EquipmentEntity equipment) {
         Long tenantId = currentAccessService.requireActiveTenantId();
         SiteVO site = siteService.getDefaultSites().get(0);
+        // 新增前按当前读锁定成员、角色及厂区授权，不能沿用旧RR快照。
+        siteWriteAccess.lockSite(site.getId());
         // 即使请求体填写了其他归属，也必须由服务端覆盖。
         equipment.setTenantId(tenantId);
         equipment.setSiteId(site.getId());

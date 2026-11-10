@@ -23,6 +23,12 @@ public class SiteController {
         return Result.success(siteService.getDefaultSites());
     }
 
+    /** 查询当前成员可见的厂区目录；默认列表契约保持原样。 */
+    @GetMapping("/catalog")
+    public Result<List<SiteVO>> catalog() {
+        return Result.success(siteService.getSiteCatalog());
+    }
+
     /** 查询当前企业指定厂区。 */
     @GetMapping("/{id}")
     public Result<SiteVO> detail(@PathVariable("id") Long id) {

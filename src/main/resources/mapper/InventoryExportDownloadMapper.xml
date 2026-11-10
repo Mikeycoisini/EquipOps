@@ -23,14 +23,30 @@
         AND run_token=#{task.runToken} AND storage_key=#{task.storageKey}
         AND status='SUCCEEDED' AND expires_at &gt; CURRENT_TIMESTAMP(6)
     </sql>
+    <!-- 旧文件缺少可信快照时明确要求重导，不把空集合解释为全企业。 -->
+    <select id="hasTaskSites" resultType="boolean" timeout="10">
+        SELECT COUNT(*) &gt; 0 FROM inventory_export_task_sites
+        WHERE task_id = #{task.id} AND tenant_id = #{task.tenantId}
+    </select>
     <!-- 文件句柄已打开后，重新确认权限和文件发布条件，避免使用旧授权快照。 -->
     <select id="canDownload" resultType="boolean" timeout="10">
         SELECT COUNT(*) &gt; 0 FROM inventory_export_tasks WHERE <include refid="sameFile"/>
+        AND EXISTS (SELECT 1 FROM inventory_export_task_sites snapshot
+            WHERE snapshot.task_id = #{task.id} AND snapshot.tenant_id = #{task.tenantId})
+        AND NOT EXISTS (SELECT 1 FROM inventory_export_task_sites snapshot
+            LEFT JOIN sites s ON s.id = snapshot.site_id AND s.tenant_id = snapshot.tenant_id
+            WHERE snapshot.task_id = #{task.id} AND snapshot.tenant_id = #{task.tenantId}
+              AND (s.id IS NULL OR NOT (s.tenant_id = #{task.tenantId} AND s.enabled = 1
         AND EXISTS (SELECT 1 FROM users u
-            JOIN tenant_memberships m ON m.user_id=u.id
-            JOIN tenants te ON te.id=m.tenant_id
-            WHERE u.id=#{task.createdBy} AND te.id=#{task.tenantId}
-              AND u.enabled=1 AND m.enabled=1 AND te.enabled=1)
+            JOIN tenant_memberships m ON m.user_id = u.id
+            JOIN tenants te ON te.id = m.tenant_id
+            WHERE u.id = #{task.createdBy} AND te.id = #{task.tenantId}
+              AND u.enabled=1 AND m.enabled=1 AND te.enabled=1
+              AND (EXISTS (SELECT 1 FROM tenant_member_roles mr JOIN roles r ON r.id = mr.role_id
+                    WHERE mr.tenant_id = m.tenant_id AND mr.membership_id = m.id AND r.role_code = 'TENANT_ADMIN')
+                OR EXISTS (SELECT 1 FROM tenant_member_site_scopes sc
+                    WHERE sc.tenant_id = m.tenant_id AND sc.membership_id = m.id AND sc.site_id = s.id))))))
+
     </select>
     <!-- 仅记录缺失错误，不把成功终态改为FAILED，也不泄露真实服务器路径。 -->
     <update id="markFileMissing" timeout="10">

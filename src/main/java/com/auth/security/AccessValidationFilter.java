@@ -71,6 +71,13 @@ public class AccessValidationFilter extends OncePerRequestFilter {
         } else if ("PATCH".equals(request.getMethod()) && path.matches("/api/tenant-members/[1-9][0-9]*/status")) {
             action = com.equipops.domain.enums.AuditAction.MEMBER_STATUS_CHANGED;
         }
+        if ("PUT".equals(request.getMethod()) && path.matches("/api/tenant-members/[1-9][0-9]*/site-scopes")) {
+            action = com.equipops.domain.enums.AuditAction.MEMBER_SITE_SCOPES_CHANGED;
+        } else if ("POST".equals(request.getMethod()) && path.equals("/api/sites")) {
+            action = com.equipops.domain.enums.AuditAction.SITE_CREATED;
+        } else if ("PUT".equals(request.getMethod()) && path.matches("/api/sites/[1-9][0-9]*")) {
+            action = com.equipops.domain.enums.AuditAction.SITE_UPDATED;
+        }
         // 2. 其他路径及只读查询不形成全量请求审计。
         if (action == null) return;
         com.auth.model.TenantAccess actor;
@@ -86,7 +93,9 @@ public class AccessValidationFilter extends OncePerRequestFilter {
             // 4. 目标对象未在业务中确认，因此不记录请求中的目标ID。
             audit.appendDenied(new com.equipops.domain.dto.audit.AuditAppendCommand(
                     actor.getTenant().getId(), actor.getUserId(), action,
-                    com.equipops.domain.enums.AuditObjectType.MEMBER, null, java.util.Map.of(), "FORBIDDEN", null));
+                    action == com.equipops.domain.enums.AuditAction.SITE_CREATED || action == com.equipops.domain.enums.AuditAction.SITE_UPDATED
+                            ? com.equipops.domain.enums.AuditObjectType.SITE : com.equipops.domain.enums.AuditObjectType.MEMBER,
+                    null, java.util.Map.of(), "FORBIDDEN", null));
         } catch (RuntimeException unavailable) {
             // 5. 审计存储错误不能替换原403，日志也不输出异常正文或凭据。
             LOG.warn("成员过滤拒绝审计未写入，action={}", action);

@@ -23,7 +23,7 @@ class InventoryExportMapperSqlTest {
         var config=config();
         var task=InventoryExportTaskEntity.builder().id(1L).tenantId(7L).createdBy(2L).upperBoundId(200L)
                 .warehouseId(3L).sparePartId(4L).workOrderId(5L).build();
-        var params=new HashMap<String,Object>(); params.put("task",task); params.put("lastId",0L); params.put("query",new com.equipops.domain.dto.inventory.InventoryExportPageQueryDto());
+        var params=new HashMap<String,Object>(); params.put("request",new com.equipops.domain.dto.inventory.InventoryExportCreateDto()); params.put("siteIds",List.of(11L)); params.put("task",task); params.put("lastId",0L); params.put("query",new com.equipops.domain.dto.inventory.InventoryExportPageQueryDto());
         for(var method:InventoryExportTaskMapper.class.getDeclaredMethods()) {
             var stmt=config.getMappedStatement("com.inventory.mapper.InventoryExportTaskMapper."+method.getName());
             assertFalse(stmt.getBoundSql(params).getSql().isBlank());
@@ -31,6 +31,17 @@ class InventoryExportMapperSqlTest {
         String batch=config.getMappedStatement("com.inventory.mapper.InventoryExportTaskMapper.selectExportBatch").getBoundSql(params).getSql().replaceAll("\\s+"," ");
         assertTrue(batch.contains("t.tenant_id = ?")); assertTrue(batch.contains("t.id > ? AND t.id <= ?"));
         assertTrue(batch.contains("ORDER BY t.id ASC LIMIT 1000")); assertTrue(batch.contains("w.tenant_id = t.tenant_id"));
+    }
+    @Test void 后台批次与发布必须校验厂区快照和实时授权() throws Exception {
+        var configuration=config();
+        var task=InventoryExportTaskEntity.builder().id(1L).tenantId(7L).createdBy(2L).build();
+        for(var statement:List.of("selectExportBatch","hasExportAccess","publishSuccess")) {
+            String sql=configuration.getMappedStatement("com.inventory.mapper.InventoryExportTaskMapper."+statement).getBoundSql(Map.of("task",task,"lastId",0L)).getSql();
+            assertTrue(sql.contains("inventory_export_task_sites"),statement);
+            assertTrue(sql.contains("tenant_member_site_scopes"),statement);
+        }
+        String batch=configuration.getMappedStatement("com.inventory.mapper.InventoryExportTaskMapper.selectExportBatch").getBoundSql(Map.of("task",task,"lastId",0L)).getSql();
+        assertTrue(batch.contains("w.site_id"));assertTrue(batch.contains("wo.site_id"));
     }
     @Test void 发布和续租不能复活过期租约且终态需要令牌与权限() throws Exception {
         var config=config(); var task=new InventoryExportTaskEntity();
