@@ -148,7 +148,7 @@ class WorkOrderRejectServiceTest {
         fails(500, 10L, request("故障未消除"));
     }
 
-    @Test void 退回SQL限定企业原状态和操作人且只修改状态() throws Exception {
+    @Test void 退回SQL限定企业原状态和操作人且推进版本() throws Exception {
         var configuration = new org.apache.ibatis.session.Configuration();
         String resource = "mapper/WorkOrderMapper.xml";
         try (var input = getClass().getClassLoader().getResourceAsStream(resource)) {
@@ -158,7 +158,7 @@ class WorkOrderRejectServiceTest {
         }
         var bound = configuration.getMappedStatement("com.workorder.mapper.WorkOrderMapper.rejectWorkOrder")
                 .getBoundSql(Map.of("tenantId", 7L, "id", 10L, "actorUserId", 1L));
-        assertEquals("UPDATE work_orders SET status = 'IN_PROGRESS' WHERE tenant_id = ? AND id = ? "
+        assertEquals("UPDATE work_orders SET status = 'IN_PROGRESS', version = version + 1 WHERE tenant_id = ? AND id = ? "
                 + "AND status = 'AWAITING_ACCEPTANCE' AND assignee_user_id != ?",
                 bound.getSql().replaceAll("\\s+", " ").trim());
         assertEquals(List.of("tenantId", "id", "actorUserId"),

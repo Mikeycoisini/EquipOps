@@ -13,12 +13,15 @@ import lombok.NoArgsConstructor;
 public class WorkOrderPartVO {
 
     /** 工单备件关联 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long id;
 
     /** 关联工单 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long workOrderId;
 
     /** 关联备件 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long sparePartId;
 
     /** 备件编号，来自当前企业的备件目录。 */

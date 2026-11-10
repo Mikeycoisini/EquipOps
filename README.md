@@ -40,7 +40,7 @@ python3 scripts/check_a0.py --frontend ../OPS-V2.0-
 | REDIS_SESSION_NAMESPACE | equipops:v2:session |
 | INVENTORY_EXPORT_ROOT | 用户主目录下.equipops-v2/inventory-exports |
 
-先确认数据库目标，再通过Flyway初始化结构。现有正式迁移V1—V16，告警V13、续扫V14、审计V15、厂区范围V16；数据库clean关闭，自动baseline关闭。
+先确认数据库目标，再通过Flyway初始化结构。现有正式迁移V1—V17，告警V13、续扫V14、审计V15、厂区范围V16、团队与改派V17；数据库clean关闭，自动baseline关闭。
 
 ```bash
 ./mvnw -DskipTests package
@@ -68,3 +68,7 @@ Session写请求保留CSRF，企业身份由后端核验。迁移、事务、并
 ## A3厂区范围
 
 [交付与验证](docs/plan/61-A3厂区范围交付与验证.md)记录显式成员厂区、全入口SQL权限、导出范围快照及下载动态撤权。普通成员历史数据不自动授予权限；上线前先核对映射。设置`A2_MYSQL_TESTS=true A3_MYSQL_TESTS=true`运行`bash scripts/a1_verify.sh`可复验隔离库事务及A1—A3真实HTTP。
+
+## A4团队协作
+
+[交付与验证](docs/plan/63-A4团队协作交付与验证.md)记录团队成员/工作厂区、个人与团队资格交集、受控改派、版本/幂等及责任历史。设置`A2_MYSQL_TESTS=true A3_MYSQL_TESTS=true A4_MYSQL_TESTS=true`运行`bash scripts/a1_verify.sh`复验隔离库与A1—A4真实HTTP；`scripts/a4_browser_fixture.py`只用于显式确认的隔离环境浏览器夹具，不提供生产账号初始化。

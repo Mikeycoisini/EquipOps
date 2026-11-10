@@ -14,9 +14,11 @@ import lombok.NoArgsConstructor;
 public class WorkOrderLogVO {
 
     /** 工单操作记录 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long id;
 
     /** 关联工单 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long workOrderId;
 
     /** 工单事件类型 */
@@ -35,6 +37,7 @@ public class WorkOrderLogVO {
     private String detail;
 
     /** 操作人用户 ID */
+    @com.fasterxml.jackson.annotation.JsonFormat(shape=com.fasterxml.jackson.annotation.JsonFormat.Shape.STRING)
     private Long actorUserId;
 
     /** 创建时间 */

@@ -61,11 +61,11 @@ class WorkOrderMapperSqlTest {
     }
 
     @Test
-    void 派单仅修改负责人并保留并发与企业条件() throws Exception {
+    void 派单修改负责人并推进版本且保留并发与企业条件() throws Exception {
         BoundSql bound = sql("WorkOrderMapper.xml", "com.workorder.mapper.WorkOrderMapper.assignWorkOrder",
                 Map.of("tenantId", 7L, "id", 10L, "assigneeUserId", 20L));
         String sql = text(bound);
-        assertTrue(sql.contains("SET assignee_user_id = ? WHERE tenant_id = ? AND id = ?"));
+        assertTrue(sql.contains("SET assignee_user_id = ?, version = version + 1 WHERE tenant_id = ? AND id = ?"));
         assertTrue(sql.contains("AND status = 'PENDING'"));
         assertTrue(sql.contains("AND assignee_user_id IS NULL"));
         assertFalse(sql.substring(sql.indexOf("SET"), sql.indexOf("WHERE")).contains("status"));
@@ -77,7 +77,7 @@ class WorkOrderMapperSqlTest {
     void 开始维修保留企业状态和负责人条件() throws Exception {
         BoundSql bound = sql("WorkOrderMapper.xml", "com.workorder.mapper.WorkOrderMapper.startRepair",
                 Map.of("tenantId", 7L, "id", 10L, "assigneeUserId", 20L));
-        assertTrue(text(bound).contains("SET status = 'IN_PROGRESS' WHERE tenant_id = ? AND id = ?"));
+        assertTrue(text(bound).contains("SET status = 'IN_PROGRESS', version = version + 1 WHERE tenant_id = ? AND id = ?"));
         assertTrue(text(bound).contains("AND status = 'PENDING' AND assignee_user_id = ?"));
         assertEquals(List.of("tenantId", "id", "assigneeUserId"),
                 bound.getParameterMappings().stream().map(p -> p.getProperty()).toList());
