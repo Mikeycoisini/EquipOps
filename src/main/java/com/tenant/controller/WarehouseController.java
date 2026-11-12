@@ -1,6 +1,7 @@
 package com.tenant.controller;
 
 import com.common.response.Result;
+import com.inventory.transfer.WarehouseCatalogService;
 import com.tenant.service.WarehouseService;
 import com.equipops.domain.dto.tenant.WarehouseUpsertDto;
 import com.equipops.domain.vo.WarehouseVO;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class WarehouseController {
     private final WarehouseService warehouseService;
+    private final WarehouseCatalogService catalogService;
 
     /** 查询当前企业启用的默认仓库。 */
     @GetMapping
@@ -26,5 +28,21 @@ public class WarehouseController {
     @PostMapping
     public Result<WarehouseVO> create(@Valid @RequestBody WarehouseUpsertDto request) {
         return Result.success(warehouseService.createWarehouse(request));
+    }
+
+    @GetMapping("/catalog")
+    public Result<List<WarehouseCatalogService.Warehouse>> catalog() {
+        return Result.success(catalogService.catalog());
+    }
+
+    @GetMapping("/{id}")
+    public Result<WarehouseCatalogService.Warehouse> detail(@PathVariable long id) {
+        return Result.success(catalogService.detail(id));
+    }
+
+    @PutMapping("/{id}")
+    public Result<WarehouseCatalogService.Warehouse> update(@PathVariable long id,
+                                                            @Valid @RequestBody WarehouseUpsertDto request) {
+        return Result.success(catalogService.update(id, request));
     }
 }

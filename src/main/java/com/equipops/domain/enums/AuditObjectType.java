@@ -5,5 +5,6 @@ public enum AuditObjectType {
     MEMBER,
     SITE,
     TEAM,
-    WORK_ORDER
+    WORK_ORDER,
+    TRANSFER
 }
