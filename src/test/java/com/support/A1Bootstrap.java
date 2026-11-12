@@ -43,10 +43,10 @@ public final class A1Bootstrap {
             String password = System.getenv("A1_TEST_PASSWORD");
             validateTarget(schema, System.getenv("A1_DB_CONFIRM"), password);
             if (checkOnly) return;
-            // 2. 只接受已完成当前18个正式迁移的库，不在初始化器执行DDL。
-            if (number(db, "SELECT COUNT(*) FROM flyway_schema_history WHERE success=1 AND version IS NOT NULL") != 18
+            // 2. 只接受已完成当前19个正式迁移的库，不在初始化器执行DDL。
+            if (number(db, "SELECT COUNT(*) FROM flyway_schema_history WHERE success=1 AND version IS NOT NULL") != 19
                     || number(db, "SELECT COUNT(*) FROM flyway_schema_history WHERE success=0") != 0) {
-                throw new IllegalStateException("需先验证V1—V18迁移");
+                throw new IllegalStateException("需先验证V1—V19迁移");
             }
             db.setTransactionIsolation(Connection.TRANSACTION_SERIALIZABLE);
             db.setAutoCommit(false);
