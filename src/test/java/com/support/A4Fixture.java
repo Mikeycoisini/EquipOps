@@ -20,8 +20,11 @@ public final class A4Fixture {
                 String schema;
                 try(var statement=db.createStatement();var result=statement.executeQuery("SELECT DATABASE()")){result.next();schema=result.getString(1);}
                 A1Bootstrap.validateTarget(schema,System.getenv("A1_DB_CONFIRM"),System.getenv("A1_TEST_PASSWORD"));
-                if(number(db,"SELECT COUNT(*) FROM flyway_schema_history WHERE success=1 AND version IS NOT NULL")!=17
-                        || number(db,"SELECT COUNT(*) FROM flyway_schema_history WHERE success=0")!=0)throw new IllegalStateException("需要17项正式迁移");
+                // A4 依赖 V17 的团队和改派表，后续成功的迁移不影响夹具使用。
+                if(number(db,"SELECT COUNT(*) FROM flyway_schema_history WHERE version='17' AND success=1")!=1
+                        || number(db,"SELECT COUNT(*) FROM flyway_schema_history WHERE success=0")!=0) {
+                    throw new IllegalStateException("需要成功应用 V17 且无失败迁移");
+                }
                 db.setAutoCommit(false);
                 try {
                     var result=args[0].equals("create")?create(db,tag):cleanup(db,tag);
