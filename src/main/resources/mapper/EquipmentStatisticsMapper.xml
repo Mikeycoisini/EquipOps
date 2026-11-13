@@ -14,6 +14,7 @@
         FROM work_orders w
         INNER JOIN equipment e ON e.tenant_id = w.tenant_id AND e.id = w.equipment_id
         WHERE w.tenant_id = #{tenantId}
+          AND w.source = 'REPAIR_REPORT'
           AND w.created_at &gt;= #{startTime}
           AND w.created_at &lt; #{endTime}
         GROUP BY e.id, e.asset_code, e.name

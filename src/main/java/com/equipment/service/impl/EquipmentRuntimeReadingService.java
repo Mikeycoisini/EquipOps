@@ -21,6 +21,7 @@ public class EquipmentRuntimeReadingService {
     private final EquipmentRuntimeReadingMapper readings;
     private final SiteWriteAccessService siteWriteAccess;
     private final CurrentAccessService access;
+    private final EquipmentRuntimeMaintenanceService maintenance;
 
     /** 1.核验设备的企业与厂区可见性；2.按设备读取最近记录。 */
     @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
@@ -31,7 +32,7 @@ public class EquipmentRuntimeReadingService {
         return readings.recent(asset.getTenantId(), asset.getSiteId(), equipmentId, 20);
     }
 
-    /** 1.校验读数；2.锁定授权和设备；3.比较最新读数；4.登记或返回既有记录。 */
+    /** 1.校验读数；2.锁定授权和设备；3.比较最新读数；4.登记或返回既有记录；5.按阈值触发维护。 */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public EquipmentRuntimeReadingVO record(Long equipmentId, BigDecimal hours) {
         // 校验累计小时的范围和精度，覆盖通过服务调用的入口。
@@ -67,6 +68,8 @@ public class EquipmentRuntimeReadingService {
         if (readings.insert(asset.getTenantId(), asset.getSiteId(), equipmentId, reading) != 1 || reading.getId() == null) {
             throw new IllegalStateException("运行小时读数保存失败");
         }
+        // 超过阈值时同事务创建工单，失败则读数也回滚。
+        maintenance.onReading(asset, equipmentId, reading.getHours());
         return reading;
     }
 }

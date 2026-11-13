@@ -73,6 +73,21 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     @Transactional
     @Override
     public WorkOrderVO reportRepair(WorkOrderCreateDto request) {
+        return createOrder(request, false);
+    }
+
+    @Override
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public WorkOrderVO createRuntimeMaintenanceOrder(Long equipmentId, String description) {
+        // 维护工单由阈值服务在读数事务内创建，等待管理员派单。
+        var request = new WorkOrderCreateDto();
+        request.setTitle("运行小时到期维护");
+        request.setEquipmentId(equipmentId);
+        request.setDescription(description);
+        return createOrder(request, true);
+    }
+
+    private WorkOrderVO createOrder(WorkOrderCreateDto request, boolean runtimeMaintenance) {
         Long tenantId = currentAccessService.requireActiveTenantId();
 
         //校验报修信息：标题、设备 ID、优先级等必填项是否合法。
@@ -122,6 +137,10 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         //每个setter对应sql表的一列
         WorkOrderEntity order = new WorkOrderEntity();
         order.setOrderNo(orderNo);
+        // 单独标记小时维护来源，报修次数仍只统计报修工单。
+        if (runtimeMaintenance) {
+            order.setSource("RUNTIME_MAINTENANCE");
+        }
         order.setTitle(title);
         order.setEquipmentId(request.getEquipmentId());
         // 工单必须继承已验证设备的企业和厂区，不允许客户端指定归属。
@@ -158,7 +177,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         log.setFromStatus(null);
         log.setToStatus(WorkOrderStatus.PENDING);
         log.setTitle("工单创建");
-        log.setDetail("报修工单已创建, 等待派单");
+        log.setDetail(runtimeMaintenance ? "达到运行小时阈值，自动创建维护工单，等待派单" : "报修工单已创建, 等待派单");
         log.setActorUserId(createdBy);
 
         if (workOrderLogMapper.insert(log) != 1) {

@@ -25,7 +25,7 @@ class EquipmentStatisticsSqlTest {
         var statement=config.getMappedStatement("com.statistics.mapper.EquipmentStatisticsMapper.selectRepairCounts");
         var bound=statement.getBoundSql(args);String sql=bound.getSql().replaceAll("\\s+"," ").trim();
         assertTrue(sql.contains("e.tenant_id = w.tenant_id AND e.id = w.equipment_id"));
-        assertTrue(sql.contains("WHERE w.tenant_id = ? AND w.created_at >= ? AND w.created_at < ?"));
+        assertTrue(sql.contains("WHERE w.tenant_id = ? AND w.source = 'REPAIR_REPORT' AND w.created_at >= ? AND w.created_at < ?"));
         assertTrue(sql.contains("COUNT(*) AS work_order_count"));assertFalse(sql.contains("work_order_logs"));assertFalse(sql.contains("w.status"));
         assertTrue(sql.endsWith("GROUP BY e.id, e.asset_code, e.name ORDER BY work_order_count DESC, e.id ASC LIMIT ?"));
         Map<Integer,Object> values=new HashMap<>();

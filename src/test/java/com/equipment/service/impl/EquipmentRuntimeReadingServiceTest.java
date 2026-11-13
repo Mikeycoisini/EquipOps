@@ -30,7 +30,7 @@ class EquipmentRuntimeReadingServiceTest {
     private final SiteWriteAccessService siteAccess = mock(SiteWriteAccessService.class);
     private final CurrentAccessService access = mock(CurrentAccessService.class);
     private final EquipmentRuntimeReadingService service =
-            new EquipmentRuntimeReadingService(equipment, mapper, siteAccess, access);
+            new EquipmentRuntimeReadingService(equipment, mapper, siteAccess, access, mock(EquipmentRuntimeMaintenanceService.class));
 
     @BeforeEach
     void device() {

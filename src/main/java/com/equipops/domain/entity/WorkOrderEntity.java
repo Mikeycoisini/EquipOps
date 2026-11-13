@@ -43,6 +43,11 @@ public class WorkOrderEntity {
     @TableField(value="version", insertStrategy=FieldStrategy.NEVER, updateStrategy=FieldStrategy.NEVER)
     private Long version = 0L;
 
+    /** 区分人工报修与小时维护，历史记录由数据库默认值归类。 */
+    @Column(name = "source", nullable = false, length = 24)
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private String source;
+
     /** 工单编号 */
     @Column(name = "order_no", nullable = false, length = 40, unique = true)
     private String orderNo;

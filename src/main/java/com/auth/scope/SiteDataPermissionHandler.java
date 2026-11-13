@@ -13,7 +13,7 @@ import net.sf.jsqlparser.schema.Table;
 /** AST级企业及厂区边界；仅后台专用Mapper自带固定任务主体授权，其他无主体访问均拒绝。 */
 public final class SiteDataPermissionHandler implements MultiDataPermissionHandler {
     private static final Set<String> DIRECT = Set.of("warehouses", "equipment", "work_orders",
-            "maintenance_plans", "maintenance_executions", "equipment_runtime_readings");
+            "maintenance_plans", "maintenance_executions", "equipment_runtime_readings", "equipment_runtime_maintenance");
     private static final Set<String> INDIRECT = Set.of("warehouse_stock", "inventory_transactions",
             "equipment_spare_parts", "work_order_logs", "work_order_parts");
     private static final Set<String> BACKGROUND = Set.of("com.inventory.mapper.InventoryExportTaskMapper",

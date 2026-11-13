@@ -15,6 +15,9 @@ public interface WorkOrderService {
     /** 提交报修并创建维修工单。 */
     WorkOrderVO reportRepair(WorkOrderCreateDto request);
 
+    /** 由运行小时阈值触发，沿用设备授权、初始状态和工单日志。 */
+    WorkOrderVO createRuntimeMaintenanceOrder(Long equipmentId, String description);
+
     /** 将维修工单派发给指定负责人。 */
     WorkOrderVO dispatch(Long id, WorkOrderDispatchDto request);
     /** 分页查询当前企业工单，不在列表中逐条加载日志。 */
