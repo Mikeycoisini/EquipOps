@@ -43,8 +43,8 @@ public final class A1Bootstrap {
             String password = System.getenv("A1_TEST_PASSWORD");
             validateTarget(schema, System.getenv("A1_DB_CONFIRM"), password);
             if (checkOnly) return;
-            // 2. 只接受已完成当前19个正式迁移的库，不在初始化器执行DDL。
-            if (number(db, "SELECT COUNT(*) FROM flyway_schema_history WHERE success=1 AND version IS NOT NULL") != 19
+            // 2. 要求历史V1至V19均已完成，允许后续迁移，不在初始化器执行DDL。
+            if (number(db, "SELECT COUNT(*) FROM flyway_schema_history WHERE success=1 AND version IN ('1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19')") != 19
                     || number(db, "SELECT COUNT(*) FROM flyway_schema_history WHERE success=0") != 0) {
                 throw new IllegalStateException("需先验证V1—V19迁移");
             }

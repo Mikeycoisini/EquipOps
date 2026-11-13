@@ -1,6 +1,7 @@
 package com.common.response;
 
 import com.equipment.controller.EquipmentController;
+import com.equipment.controller.EquipmentRuntimeReadingController;
 import com.statistics.controller.EquipmentStatisticsController;
 import com.statistics.controller.WorkOrderStatisticsController;
 import com.equipment.controller.EquipmentSparePartController;
@@ -21,7 +22,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
 
 /** 仅处理本批业务入口的明确错误，保留现有认证和成员模块行为。 */
-@RestControllerAdvice(assignableTypes = {EquipmentController.class, MaintenanceHistoryController.class,
+@RestControllerAdvice(assignableTypes = {EquipmentController.class, EquipmentRuntimeReadingController.class, MaintenanceHistoryController.class,
         EquipmentWorkOrderController.class, WorkerderController.class, SparePartController.class, InventoryTransactionController.class,
         WorkspaceController.class, MaintenancePlanController.class, MaintenanceExecutionController.class, EquipmentSparePartController.class, EquipmentStatisticsController.class, WorkOrderStatisticsController.class, SparePartCompatibilityController.class})
 public class BusinessExceptionHandler {

@@ -20,6 +20,7 @@ import com.tenant.service.SiteService;
 import com.workorder.mapper.UserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Service;
@@ -99,11 +100,20 @@ public class EquipmentServiceImpl extends ServiceImpl<EquipmentMapper, Equipment
             throw new IllegalStateException("设备正在运行中,请勿删除");
         }
         // 删除条件仍带企业和原状态，避免查询后状态变化时误删运行中的设备。
-        if (equipmentMapper.delete(new LambdaQueryWrapper<EquipmentEntity>()
-                .eq(EquipmentEntity::getId, id)
-                .eq(EquipmentEntity::getTenantId, equipment.getTenantId())
-                .eq(EquipmentEntity::getStatus, equipment.getStatus())) != 1) {
-            throw new IllegalStateException("设备删除失败");
+        try {
+            if (equipmentMapper.delete(new LambdaQueryWrapper<EquipmentEntity>()
+                    .eq(EquipmentEntity::getId, id)
+                    .eq(EquipmentEntity::getTenantId, equipment.getTenantId())
+                    .eq(EquipmentEntity::getStatus, equipment.getStatus())) != 1) {
+                throw new IllegalStateException("设备删除失败");
+            }
+        } catch (DataIntegrityViolationException exception) {
+            // 外键同时保护删除和抄表并发，命中读数约束时返回可操作的提示。
+            String detail = exception.getMostSpecificCause().getMessage();
+            if (detail != null && detail.contains("fk_runtime_reading_equipment")) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "设备已有运行小时读数，不能删除");
+            }
+            throw exception;
         }
         //返回设备
         return equipment;
