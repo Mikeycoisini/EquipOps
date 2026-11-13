@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.equipment.mapper.EquipmentMapper;
 import com.equipops.domain.dto.workorder.*;
 import com.equipops.domain.entity.*;
+import com.equipops.domain.enums.FaultCategory;
 import com.equipops.domain.enums.WorkOrderEventType;
 import com.equipops.domain.enums.WorkOrderPriority;
 import com.equipops.domain.enums.WorkOrderStatus;
@@ -97,6 +98,15 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         if (!StringUtils.hasText(request.getTitle())) {
             throw new IllegalArgumentException("报修标题不能为空");
         }
+        // 分类只接受约定编码。历史调用可省略，自动工单不写故障分类。
+        FaultCategory category = null;
+        if (!runtimeMaintenance && request.getFaultCategory() != null) {
+            try {
+                category = FaultCategory.valueOf(request.getFaultCategory());
+            } catch (IllegalArgumentException invalid) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "故障分类编码无效");
+            }
+        }
         String title = request.getTitle().trim();
         if (title.length() > 200) {
             throw new IllegalArgumentException("报修标题不能超过 200 个字符");
@@ -147,6 +157,8 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         order.setTenantId(equipment.getTenantId());
         order.setSiteId(equipment.getSiteId());
         order.setDescription(request.getDescription());
+        // 保存人工报修的分类，设备和企业归属仍取自授权上下文。
+        order.setFaultCategory(category);
         /*
         如果你直接 order.setPriority(request.getPriority()) 而前端没传优先级，就会把默认值覆盖成null。
         MyBatis-Plus 又会跳过 null 字段，最后靠数据库默认值填上——虽然结果也是 NORMAL，但对象里的值和数据库里的值不一致，后面组装 VO 时会拿到 null。

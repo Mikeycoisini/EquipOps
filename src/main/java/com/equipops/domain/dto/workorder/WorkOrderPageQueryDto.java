@@ -1,5 +1,6 @@
 package com.equipops.domain.dto.workorder;
 
+import com.equipops.domain.enums.FaultCategory;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
@@ -38,10 +39,12 @@ public class WorkOrderPageQueryDto {
     /** true只查询已逾期未完成工单；false或省略保留原查询。 */
     private Boolean overdueOnly;
 
+    private FaultCategory faultCategory;
+
     /** 保留原七参数构造方式，旧调用不启用逾期筛选。 */
     public WorkOrderPageQueryDto(long current, long size, String keyword, WorkOrderStatus status,
             WorkOrderPriority priority, Long equipmentId, Long assigneeUserId) {
-        this(current, size, keyword, status, priority, equipmentId, assigneeUserId, null);
+        this(current, size, keyword, status, priority, equipmentId, assigneeUserId, null, null);
     }
 
 }

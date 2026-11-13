@@ -106,6 +106,49 @@ class WorkOrderServiceXmlTest {
         return service;
     }
 
+    @Test
+    void classifiedReportPersistsAndReturnsTheCategory() {
+        var access = org.mockito.Mockito.mock(CurrentAccessService.class);
+        org.mockito.Mockito.when(access.requireActiveTenantId()).thenReturn(7L);
+        org.mockito.Mockito.when(access.requireEnabledUserId()).thenReturn(1L);
+        var device = new com.equipops.domain.entity.EquipmentEntity();
+        device.setTenantId(7L);
+        device.setSiteId(3L);
+        var devices = org.mockito.Mockito.mock(EquipmentMapper.class);
+        org.mockito.Mockito.when(devices.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(device);
+        var orders = org.mockito.Mockito.mock(WorkOrderMapper.class);
+        var stored = new java.util.concurrent.atomic.AtomicReference<WorkOrderEntity>();
+        org.mockito.Mockito.when(orders.insert(org.mockito.ArgumentMatchers.any(WorkOrderEntity.class))).thenAnswer(call -> {
+            WorkOrderEntity row = call.getArgument(0);
+            row.setId(10L);
+            stored.set(row);
+            return 1;
+        });
+        org.mockito.Mockito.when(orders.selectOne(org.mockito.ArgumentMatchers.any())).thenAnswer(call -> stored.get());
+        var logs = org.mockito.Mockito.mock(WorkOrderLogMapper.class);
+        org.mockito.Mockito.when(logs.insert(org.mockito.ArgumentMatchers.any(WorkOrderLogEntity.class))).thenReturn(1);
+        org.mockito.Mockito.when(logs.selectByWorkOrderId(7L, 10L)).thenReturn(List.of());
+        var service = new WorkOrderServiceImpl(orders, logs, null, devices, access, null);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "siteWriteAccess",
+                org.mockito.Mockito.mock(com.auth.scope.SiteWriteAccessService.class));
+        var request = new com.equipops.domain.dto.workorder.WorkOrderCreateDto();
+        request.setTitle("Motor fault");
+        request.setEquipmentId(20L);
+
+        request.setFaultCategory("UNKNOWN");
+        var invalid = assertThrows(ResponseStatusException.class, () -> service.reportRepair(request));
+        assertEquals(400, invalid.getStatusCode().value());
+        assertNull(stored.get());
+
+        request.setFaultCategory("ELECTRICAL");
+        assertEquals(com.equipops.domain.enums.FaultCategory.ELECTRICAL, service.reportRepair(request).getFaultCategory());
+        assertEquals(com.equipops.domain.enums.FaultCategory.ELECTRICAL, stored.get().getFaultCategory());
+
+        request.setFaultCategory(null);
+        assertNull(service.reportRepair(request).getFaultCategory());
+        assertNull(stored.get().getFaultCategory());
+    }
+
     private WorkOrderDispatchDto dispatchRequest() {
         WorkOrderDispatchDto request = new WorkOrderDispatchDto();
         request.setAssigneeUserId(20L);

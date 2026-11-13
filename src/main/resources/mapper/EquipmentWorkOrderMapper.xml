@@ -4,7 +4,7 @@
 <mapper namespace="com.workorder.mapper.EquipmentWorkOrderMapper">
     <!-- 复用原工单实体字段映射，不重复维护同一份 resultMap。 -->
     <select id="selectWorkOrderPage" resultMap="com.workorder.mapper.WorkOrderMapper.workOrderMap">
-        SELECT id, tenant_id, site_id, order_no, title, equipment_id, description,
+        SELECT id, tenant_id, site_id, order_no, title, equipment_id, description, fault_category,
                priority, status, assignee_user_id, due_at, completed_at,
                created_by, created_at, updated_at
         FROM work_orders

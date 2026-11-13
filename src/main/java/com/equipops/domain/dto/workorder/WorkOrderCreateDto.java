@@ -35,4 +35,6 @@ public class WorkOrderCreateDto {
 
     /** 创建人用户 ID */
     private Long createdBy;
+
+    private String faultCategory;
 }

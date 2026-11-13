@@ -2,6 +2,7 @@ package com.workorder.mapper;
 
 import com.equipops.domain.dto.workorder.WorkOrderPageQueryDto;
 import com.equipops.domain.entity.WorkOrderLogEntity;
+import com.equipops.domain.enums.FaultCategory;
 import com.equipops.domain.enums.WorkOrderPriority;
 import com.equipops.domain.enums.WorkOrderStatus;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
@@ -28,6 +29,21 @@ class WorkOrderMapperSqlTest {
 
     private String text(BoundSql sql) {
         return sql.getSql().replaceAll("\\s+", " ").trim();
+    }
+
+    @Test
+    void orderPageSelectsFaultCategoryForListDisplay() throws Exception {
+        var bound = sql("WorkOrderMapper.xml", "com.workorder.mapper.WorkOrderMapper.selectWorkOrderPage",
+                Map.of("tenantId", 7L, "query", new WorkOrderPageQueryDto()));
+        assertTrue(text(bound).contains("fault_category"));
+        assertFalse(text(bound).contains("AND fault_category ="));
+        var query = new WorkOrderPageQueryDto();
+        query.setFaultCategory(FaultCategory.ELECTRICAL);
+        var filtered = sql("WorkOrderMapper.xml", "com.workorder.mapper.WorkOrderMapper.selectOverdueWorkOrderPage",
+                Map.of("tenantId", 7L, "query", query, "asOf", java.time.LocalDateTime.now()));
+        assertTrue(text(filtered).contains("WHERE tenant_id = ? AND fault_category = ?"));
+        assertEquals(List.of("tenantId", "query.faultCategory", "asOf"),
+                filtered.getParameterMappings().stream().map(p -> p.getProperty()).toList());
     }
 
     @Test

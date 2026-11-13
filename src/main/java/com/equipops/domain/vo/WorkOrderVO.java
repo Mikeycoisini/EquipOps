@@ -1,5 +1,6 @@
 package com.equipops.domain.vo;
 
+import com.equipops.domain.enums.FaultCategory;
 import com.equipops.domain.enums.WorkOrderPriority;
 import com.equipops.domain.enums.WorkOrderStatus;
 import java.time.LocalDateTime;
@@ -45,6 +46,8 @@ public class WorkOrderVO {
 
     /** 描述 */
     private String description;
+
+    private FaultCategory faultCategory;
 
     /** 工单优先级 */
     private WorkOrderPriority priority;

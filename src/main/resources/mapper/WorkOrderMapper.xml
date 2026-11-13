@@ -10,6 +10,7 @@
         <result property="title" column="title"/>
         <result property="equipmentId" column="equipment_id"/>
         <result property="description" column="description"/>
+        <result property="faultCategory" column="fault_category"/>
         <result property="priority" column="priority"/>
         <result property="status" column="status"/>
         <result property="assigneeUserId" column="assignee_user_id"/>
@@ -86,13 +87,16 @@
 
     <!-- 企业条件始终存在，可选筛选项不传时不加入条件；分页由 MyBatis-Plus 插件处理。 -->
     <sql id="workOrderPageQuery">
-        SELECT id, tenant_id, site_id, order_no, title, equipment_id, description,
+        SELECT id, tenant_id, site_id, order_no, title, equipment_id, description, fault_category,
                priority, status, assignee_user_id, team_id, version, due_at, completed_at,
                created_by, created_at, updated_at
         FROM work_orders
         WHERE tenant_id = #{tenantId}
         <if test="query.status != null">
             AND status = #{query.status}
+        </if>
+        <if test="query.faultCategory != null">
+            AND fault_category = #{query.faultCategory}
         </if>
         <if test="query.priority != null">
             AND priority = #{query.priority}
@@ -128,6 +132,7 @@
         title,
         equipment_id AS equipmentId,
         description,
+        fault_category,
         priority,
         status,
         assignee_user_id AS assigneeUserId,

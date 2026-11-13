@@ -1,5 +1,6 @@
 package com.equipops.domain.entity;
 
+import com.equipops.domain.enums.FaultCategory;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -63,6 +64,10 @@ public class WorkOrderEntity {
     /** 描述 */
     @Column(columnDefinition = "TEXT")
     private String description;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "fault_category", length = 16)
+    private FaultCategory faultCategory;
 
     /** 工单优先级 */
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 16)
