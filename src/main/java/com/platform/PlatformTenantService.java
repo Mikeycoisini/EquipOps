@@ -120,7 +120,7 @@ public class PlatformTenantService {
         return find(id, false);
     }
 
-    private long requireOperator(boolean lock) {
+    long requireOperator(boolean lock) {
         // 1. 获取可信登录账号；2. 逐次查询独立平台角色。
         long actor = access.requireEnabledUserId();
         String query = """

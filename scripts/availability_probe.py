@@ -11,6 +11,7 @@ import sqlite3
 import sys
 from threading import Event, Timer
 import time
+from uuid import uuid4
 
 
 HEALTH_PATH = "/actuator/health"
@@ -102,6 +103,9 @@ def read_or_initialize(database, port):
             id INTEGER PRIMARY KEY, kind TEXT NOT NULL, sampled_at TEXT NOT NULL, evidence TEXT NOT NULL
         )
     """)
+    database.execute("CREATE TABLE IF NOT EXISTS probe_identity (id INTEGER PRIMARY KEY CHECK(id = 1), stream_id TEXT NOT NULL)")
+    if database.execute("SELECT 1 FROM probe_identity WHERE id = 1").fetchone() is None:
+        database.execute("INSERT INTO probe_identity VALUES (1, ?)", (str(uuid4()),))
     database.execute("INSERT OR IGNORE INTO probe_state(id, port) VALUES (1, ?)", (port,))
     state = database.execute("SELECT * FROM probe_state WHERE id = 1").fetchone()
     if state["port"] != port:
