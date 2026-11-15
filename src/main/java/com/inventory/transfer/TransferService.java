@@ -86,8 +86,10 @@ public class TransferService {
         """;
     private static final String BOTH_SITES = """
         AND EXISTS (SELECT 1 FROM tenant_member_site_scopes g
+            JOIN sites s ON s.tenant_id=g.tenant_id AND s.id=g.site_id AND s.enabled=1
             WHERE g.tenant_id=t.tenant_id AND g.membership_id=? AND g.site_id=sw.site_id)
         AND EXISTS (SELECT 1 FROM tenant_member_site_scopes g
+            JOIN sites s ON s.tenant_id=g.tenant_id AND s.id=g.site_id AND s.enabled=1
             WHERE g.tenant_id=t.tenant_id AND g.membership_id=? AND g.site_id=tw.site_id)
         """;
 

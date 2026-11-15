@@ -98,8 +98,10 @@ public class WarehouseCatalogService {
         args.add(actor.getTenant().getId());
         String sql = "SELECT w.* FROM warehouses w WHERE w.tenant_id=?";
         if (!actor.getRoleCodes().contains("TENANT_ADMIN")) {
+            // 2. 普通成员只读取当前仍启用、且明确授予范围的厂区仓库。
             sql += """
                  AND EXISTS (SELECT 1 FROM tenant_member_site_scopes g
+                    JOIN sites s ON s.tenant_id=g.tenant_id AND s.id=g.site_id AND s.enabled=1
                     WHERE g.tenant_id=w.tenant_id AND g.membership_id=? AND g.site_id=w.site_id)
                 """;
             args.add(actor.getMembershipId());

@@ -33,6 +33,10 @@ jobs:
       A2_MYSQL_TESTS: 'true'
       A3_MYSQL_TESTS: 'true'
       A4_MYSQL_TESTS: 'true'
+      A5_MYSQL_TESTS: 'true'
+      A6_MYSQL_TESTS: 'true'
+      A7_MYSQL_TESTS: 'true'
+      A8_MYSQL_TESTS: 'true'
       REDIS_HOST: 127.0.0.1
       REDIS_PORT: '6379'
       REDIS_PASSWORD: ''

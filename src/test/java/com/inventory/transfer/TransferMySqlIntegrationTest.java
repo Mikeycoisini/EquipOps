@@ -40,6 +40,7 @@ import static org.mockito.Mockito.when;
 class TransferMySqlIntegrationTest {
     @Autowired JdbcTemplate db;
     @Autowired TransferService transfers;
+    @Autowired WarehouseCatalogService warehouses;
     @MockitoBean CurrentAccessService access;
     @MockitoBean InventoryExportServiceImpl inventoryExports;
     @MockitoSpyBean AuditEventMapper auditMapper;
@@ -135,6 +136,42 @@ class TransferMySqlIntegrationTest {
         assertEquals(409, assertThrows(ResponseStatusException.class,
                 () -> transfers.act(transfer, TransferService.Action.RECEIVE, command("in", 4, null)))
                 .getStatusCode().value());
+    }
+
+    @Test
+    void 停用任一端厂区后普通成员看不到调拨但管理员仍可查历史() {
+        long transfer = dispatch();
+        var admin = access.requireTenantAccess();
+        long sourceSite = id("SELECT site_id FROM warehouses WHERE id=?", source);
+        long targetSite = id("SELECT site_id FROM warehouses WHERE id=?", target);
+        db.update("""
+                INSERT INTO tenant_member_site_scopes(tenant_id,membership_id,site_id,granted_by)
+                VALUES (?,?,?,?),(?,?,?,?)
+                """, tenant, admin.getMembershipId(), sourceSite, user,
+                tenant, admin.getMembershipId(), targetSite, user);
+        try {
+            when(access.requireTenantAccess()).thenReturn(
+                    new TenantAccess(user, admin.getTenant(), admin.getMembershipId(), Set.of()));
+            assertEquals(2, warehouses.catalog().size());
+            assertEquals(1, transfers.list(null, null, null, null, 1, 20).total());
+            assertEquals(Long.toString(transfer), transfers.detail(transfer).transfer().id());
+
+            db.update("UPDATE sites SET enabled=0 WHERE tenant_id=? AND id=?", tenant, targetSite);
+            assertEquals(List.of(Long.toString(source)), warehouses.catalog().stream()
+                    .map(WarehouseCatalogService.Warehouse::id).toList());
+            assertEquals(404, assertThrows(ResponseStatusException.class, () -> warehouses.detail(target))
+                    .getStatusCode().value());
+            assertEquals(0, transfers.list(null, null, null, null, 1, 20).total());
+            assertEquals(404, assertThrows(ResponseStatusException.class, () -> transfers.detail(transfer))
+                    .getStatusCode().value());
+
+            when(access.requireTenantAccess()).thenReturn(admin);
+            assertEquals(Long.toString(target), warehouses.detail(target).id());
+            assertEquals(Long.toString(transfer), transfers.detail(transfer).transfer().id());
+        } finally {
+            db.update("DELETE FROM tenant_member_site_scopes WHERE tenant_id=? AND membership_id=?",
+                    tenant, admin.getMembershipId());
+        }
     }
 
     @Test
