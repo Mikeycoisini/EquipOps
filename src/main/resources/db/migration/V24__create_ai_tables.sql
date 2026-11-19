@@ -1,0 +1,106 @@
+-- A9重建：资料、版本、片段、任务与引用。V1—V23保持不变。
+CREATE TABLE ai_documents (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    document_code VARCHAR(64) NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    state VARCHAR(16) NOT NULL,
+    created_by BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ai_documents_tenant_id (tenant_id, id),
+    UNIQUE KEY uk_ai_documents_tenant_code (tenant_id, document_code),
+    KEY idx_ai_documents_tenant_state (tenant_id, state, id),
+    CONSTRAINT fk_ai_documents_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+    CONSTRAINT fk_ai_documents_user FOREIGN KEY (created_by) REFERENCES users(id),
+    CONSTRAINT chk_ai_documents_state CHECK (state IN ('DRAFT','ACTIVE','DELETED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE ai_document_versions (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    document_id BIGINT UNSIGNED NOT NULL,
+    version_no INT NOT NULL,
+    content_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    storage_key VARCHAR(200) NOT NULL,
+    content_text MEDIUMTEXT NOT NULL,
+    format VARCHAR(16) NOT NULL,
+    byte_size BIGINT UNSIGNED NOT NULL,
+    source_type VARCHAR(16) NOT NULL DEFAULT 'DOCUMENT',
+    source_order_id BIGINT UNSIGNED NULL,
+    index_state VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    index_task_id VARCHAR(64) NULL,
+    index_jti VARCHAR(64) NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ai_versions_tenant_id (tenant_id, id),
+    UNIQUE KEY uk_ai_versions_tenant_doc_no (tenant_id, document_id, version_no),
+    KEY idx_ai_versions_tenant_doc (tenant_id, document_id, id),
+    CONSTRAINT fk_ai_versions_document FOREIGN KEY (tenant_id, document_id) REFERENCES ai_documents(tenant_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE ai_chunks (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    version_id BIGINT UNSIGNED NOT NULL,
+    chunk_no INT NOT NULL,
+    section VARCHAR(500) NULL,
+    content_text TEXT NOT NULL,
+    content_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    index_ref VARCHAR(100) NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ai_chunks_tenant_id (tenant_id, id),
+    UNIQUE KEY uk_ai_chunks_tenant_version_no (tenant_id, version_id, chunk_no),
+    KEY idx_ai_chunks_tenant_version (tenant_id, version_id, id),
+    CONSTRAINT fk_ai_chunks_version FOREIGN KEY (tenant_id, version_id) REFERENCES ai_document_versions(tenant_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE ai_tasks (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    created_by BIGINT UNSIGNED NOT NULL,
+    request_id VARCHAR(64) NOT NULL,
+    request_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    question_text VARCHAR(2000) NOT NULL,
+    selected_versions JSON NOT NULL,
+    state VARCHAR(32) NOT NULL,
+    answer_text MEDIUMTEXT NULL,
+    warnings_json JSON NULL,
+    business_facts_json JSON NULL,
+    model_ref VARCHAR(120) NULL,
+    input_tokens INT NULL,
+    output_tokens INT NULL,
+    cost DECIMAL(19,6) NULL,
+    error_code VARCHAR(80) NULL,
+    credential_jti VARCHAR(64) NULL,
+    tool_call_count INT NOT NULL DEFAULT 0,
+    expires_at DATETIME(6) NOT NULL,
+    version BIGINT NOT NULL DEFAULT 0,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ai_tasks_tenant_id (tenant_id, id),
+    UNIQUE KEY uk_ai_tasks_tenant_request (tenant_id, request_id),
+    KEY idx_ai_tasks_tenant_user_created (tenant_id, created_by, created_at, id),
+    KEY idx_ai_tasks_state_expires (state, expires_at),
+    CONSTRAINT fk_ai_tasks_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+    CONSTRAINT fk_ai_tasks_user FOREIGN KEY (created_by) REFERENCES users(id),
+    CONSTRAINT chk_ai_tasks_state CHECK (state IN ('QUEUED','RUNNING','SUCCEEDED','INSUFFICIENT_EVIDENCE','FAILED','CANCELLED','EXPIRED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE ai_citations (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    task_id BIGINT UNSIGNED NOT NULL,
+    chunk_id BIGINT UNSIGNED NOT NULL,
+    citation_no INT NOT NULL,
+    quote_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_ai_citations_tenant_task_no (tenant_id, task_id, citation_no),
+    KEY idx_ai_citations_tenant_task (tenant_id, task_id),
+    CONSTRAINT fk_ai_citations_task FOREIGN KEY (tenant_id, task_id) REFERENCES ai_tasks(tenant_id, id),
+    CONSTRAINT fk_ai_citations_chunk FOREIGN KEY (tenant_id, chunk_id) REFERENCES ai_chunks(tenant_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
