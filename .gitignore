@@ -47,6 +47,11 @@ build/
 *.sql.gz
 *.dump
 
+# Local fault-analysis snapshots and archives (not project sources)
+/.a7-fault/
+/.a7-backend.zip
+/.a7-frontend.zip
+
 # Python-based engineering tools
 __pycache__/
 *.py[cod]
